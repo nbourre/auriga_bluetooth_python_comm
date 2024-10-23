@@ -1,10 +1,13 @@
 import asyncio
 import struct
 import sys
-from bleak import BleakClient
+import platform
+import json
+from bleak import BleakClient, BleakScanner
 
 # Configuration Bluetooth
-DEVICE_ADDRESS = "5F412FC3-B013-FB3D-9B7B-3D7370B5BDE7"  # Remplacez par l'adresse Bluetooth de votre MakeBlock Ranger
+DEVICE_NAME = "Makeblock_LE001b10672dfc"
+DEVICE_FILE = "last_connected_device.json"
 CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"
 
@@ -16,16 +19,23 @@ END_DATA_OPTIONS = {
     'NONE': b''  # Pas de données de fin
 }
 
-# Global flag to control notification printing
+# Global variables
 is_user_input_active = False
+incomplete_message = b''
 
-'''
-TODO :
-  - Concaténer les messages textes jusqu'à la fin de la ligne
-  - Trouver comment avoir le chrono des tâches (équivalent du millis() en Arduino)
-  - Ajouter la sauvegarde des données dans un fichier
-  - Sauvegarder le dernier appareil connecté dans un fichier json pour une reconnexion automatique
-'''
+def load_last_device():
+    """Load the last connected device from a JSON file."""
+    try:
+        with open(DEVICE_FILE, 'r') as f:
+            data = json.load(f)
+            return data.get("device_address")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+def save_last_device(device_address):
+    """Save the last connected device to a JSON file."""
+    with open(DEVICE_FILE, 'w') as f:
+        json.dump({"device_address": device_address}, f)
 
 def calculate_crc(data):
     """Calcule le CRC en effectuant un XOR de tous les octets."""
@@ -36,49 +46,63 @@ def calculate_crc(data):
 
 def parse_data(data):
     """Analyse les données reçues du robot (pour l'instant, les affiche simplement)."""
-    print(f"Données brutes reçues : {data.hex()}")
+    global incomplete_message
+
+    # Concatenate with any previous incomplete message
+    data = incomplete_message + data
+    lines = data.split(b'\n')
+
+    # Process each line except the last (it might be incomplete)
+    for line in lines[:-1]:
+        print(f"Données reçues : {line.hex()}")
+
+    # Keep the last line as an incomplete message if it's not complete
+    incomplete_message = lines[-1]
 
 async def notification_handler(sender, data):
-    """Gère les notifications entrantes en envoyant les données à parseData."""
-    
     """Gère les notifications entrantes en envoyant les données à parseData."""
     global is_user_input_active
 
     if is_user_input_active:
         return  # Skip handling if user input is active
-    
+
     try:
-        # Tentative de décodage des données en texte pour détecter les messages Serial.print
         message = data.decode('utf-8').strip()
         if message:
             print(f"Message série : {message}")
             return
     except UnicodeDecodeError:
-        # Si les données ne sont pas du texte, continuer le traitement normal
         pass
     
     parse_data(data)
 
-async def send_data(client, data, end_data='BOTH'):
-    """
-    Envoie des données au robot avec un en-tête et un CRC.
-    
-    Paramètres :
-    - client : Instance de BleakClient.
-    - data : Bytearray des données à envoyer.
-    - end_data : Clé de chaîne optionnelle pour sélectionner les données de fin (NL, CR, BOTH ou NONE).
-    """
-    if end_data not in END_DATA_OPTIONS:
-        end_data = 'BOTH'  # Par défaut à BOTH si l'option fournie est invalide
-    
-    # Construire le paquet complet avec en-tête, données, CRC et données de fin
-    packet = bytearray([0xFF, 0x55])  # En-tête
-    packet.extend(data)  # Données principales
-    crc = calculate_crc(packet)  # Calculer le CRC
-    packet.append(crc)  # Ajouter l'octet de CRC
-    packet.extend(END_DATA_OPTIONS[end_data])  # Ajouter les données de fin sélectionnées
+async def find_device():
+    """Scan and find the MakeBlock Ranger based on the OS."""
+    devices = await BleakScanner.discover()
+    for device in devices:
+        if platform.system() == "Darwin":  # Check if it's macOS
+            if device.name == DEVICE_NAME:
+                print(f"Device found on macOS: {device.name}, UUID: {device.address}")
+                return device.address
+        else:
+            if device.name == DEVICE_NAME and ":" in device.address:  # Match MAC address on Windows
+                print(f"Device found on Windows: {device.name}, MAC: {device.address}")
+                return device.address
 
-    # Écrire le paquet dans la caractéristique
+    print("Device not found.")
+    return None
+
+async def send_data(client, data, end_data='BOTH'):
+    """Envoie des données au robot avec un en-tête et un CRC."""
+    if end_data not in END_DATA_OPTIONS:
+        end_data = 'BOTH'
+    
+    packet = bytearray([0xFF, 0x55])
+    packet.extend(data)
+    crc = calculate_crc(packet)
+    packet.append(crc)
+    packet.extend(END_DATA_OPTIONS[end_data])
+
     await client.write_gatt_char(CHARACTERISTIC_WRITE_UUID, packet)
     print(f"Envoyé : {packet.hex()}")
 
@@ -94,15 +118,15 @@ async def listen_for_user_input(client):
             break
 
         if activation_input == ':':
-            is_user_input_active = True  # Set the flag to pause notifications
-            
+            is_user_input_active = True
+
             # Demander l'entrée de l'utilisateur
             user_input = await asyncio.get_event_loop().run_in_executor(None, input, "Entrez des données à envoyer (ou 'quit' pour quitter) : ")
             
             if user_input.lower() == 'quit':
                 break
 
-            is_user_input_active = False  # Clear the flag after processing input
+            is_user_input_active = False
 
             # Envoyer les données saisies par l'utilisateur au robot
             data_to_send = bytearray(user_input, 'utf-8')
@@ -110,19 +134,25 @@ async def listen_for_user_input(client):
 
 async def main():
     print("Tapez ':' pour activer l'entrée utilisateur.")
-    async with BleakClient(DEVICE_ADDRESS) as client:
-        print(f"Connecté à {DEVICE_ADDRESS}")
+    
+    device_address = load_last_device()
+    if not device_address:
+        device_address = await find_device()
+        if not device_address:
+            print("Unable to find the device.")
+            return
+        save_last_device(device_address)
 
-        # S'abonner aux notifications
+    async with BleakClient(device_address) as client:
+        print(f"Connecté à {device_address}")
+
         await client.start_notify(CHARACTERISTIC_NOTIFY_UUID, notification_handler)
 
         try:
             print("En attente de notifications... (Appuyez sur Ctrl+C pour arrêter)")
 
-            # Créer une tâche pour écouter les entrées utilisateur
             user_input_task = asyncio.create_task(listen_for_user_input(client))
 
-            # Garder la connexion active en attendant les notifications
             await user_input_task
 
         except KeyboardInterrupt:
