@@ -23,6 +23,8 @@ is_user_input_active = False
 TODO :
   - Concaténer les messages textes jusqu'à la fin de la ligne
   - Trouver comment avoir le chrono des tâches (équivalent du millis() en Arduino)
+  - Ajouter la sauvegarde des données dans un fichier
+  - Sauvegarder le dernier appareil connecté dans un fichier json pour une reconnexion automatique
 '''
 
 def calculate_crc(data):
