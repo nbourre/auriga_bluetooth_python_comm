@@ -4,7 +4,7 @@ import sys
 from bleak import BleakClient
 
 # Configuration Bluetooth
-DEVICE_ADDRESS = "00:1B:10:67:2D:FC"  # Remplacez par l'adresse Bluetooth de votre MakeBlock Ranger
+DEVICE_ADDRESS = "5F412FC3-B013-FB3D-9B7B-3D7370B5BDE7"  # Remplacez par l'adresse Bluetooth de votre MakeBlock Ranger
 CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"
 

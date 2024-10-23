@@ -1,1 +1,8 @@
-ÿþ
+async-timeout==4.0.3
+asyncio==3.4.3
+bleak==0.20.2
+pyobjc-core==9.2
+pyobjc-framework-Cocoa==9.2
+pyobjc-framework-CoreBluetooth==9.2
+pyobjc-framework-libdispatch==9.2
+typing-extensions==4.7.1
