@@ -85,27 +85,29 @@ async def listen_for_user_input(client):
     global is_user_input_active
 
     while True:
-        # Attendre le ":" pour activer l'entrée utilisateur
-        user_input = await asyncio.get_event_loop().run_in_executor(None, input, "Entrez des données à envoyer (ou tapez 'quit' pour quitter) : ")
+        # Prompt the user to activate input mode
+        activation_input = await asyncio.get_event_loop().run_in_executor(None, input, "Tapez ':' puis Entrée pour entrer des données (ou 'quit' pour quitter) : ")
         
-        if user_input.lower() == ':':
-            is_user_input_active = True
-        
-        # Demander l'entrée de l'utilisateur
-        user_input = await asyncio.get_event_loop().run_in_executor(None, input, "Entrez des données à envoyer (ou tapez 'quit' pour quitter) : ")
-        
-        if user_input.lower() == 'quit':
+        if activation_input.lower() == 'quit':
             break
 
-        is_user_input_active = False  # Clear the flag after processing input
-        print("[listen_for_user_input] is_user_input_active set to False")
+        if activation_input == ':':
+            is_user_input_active = True  # Set the flag to pause notifications
+            
+            # Demander l'entrée de l'utilisateur
+            user_input = await asyncio.get_event_loop().run_in_executor(None, input, "Entrez des données à envoyer (ou 'quit' pour quitter) : ")
+            
+            if user_input.lower() == 'quit':
+                break
 
-        # Envoyer les données saisies par l'utilisateur au robot
-        data_to_send = bytearray(user_input, 'utf-8')
-        await send_data(client, data_to_send)
+            is_user_input_active = False  # Clear the flag after processing input
+
+            # Envoyer les données saisies par l'utilisateur au robot
+            data_to_send = bytearray(user_input, 'utf-8')
+            await send_data(client, data_to_send)
 
 async def main():
-    print("Tapez ':' + Entrée pour activer l'entrée utilisateur.")
+    print("Tapez ':' pour activer l'entrée utilisateur.")
     async with BleakClient(DEVICE_ADDRESS) as client:
         print(f"Connecté à {DEVICE_ADDRESS}")
 
