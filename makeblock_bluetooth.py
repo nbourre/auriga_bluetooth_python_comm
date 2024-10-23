@@ -21,7 +21,7 @@ END_DATA_OPTIONS = {
 
 # Global variables
 is_user_input_active = False
-incomplete_message = b''
+incomplete_message = ""
 
 def load_last_device():
     """Load the last connected device from a JSON file."""
@@ -45,19 +45,28 @@ def calculate_crc(data):
     return crc
 
 def parse_data(data):
-    """Analyse les données reçues du robot (pour l'instant, les affiche simplement)."""
+    """Handle and concatenate fragmented messages."""
     global incomplete_message
 
-    # Concatenate with any previous incomplete message
-    data = incomplete_message + data
-    lines = data.split(b'\n')
+    try:
+        # Decode the received data to string
+        message = data.decode('utf-8', errors='ignore')
+        incomplete_message += message
+        
+        # Look for complete messages that end with a newline character
+        if '\n' in incomplete_message:
+            # Split the message on newline to get complete chunks
+            lines = incomplete_message.split('\n')
+            
+            # Process all but the last (possibly incomplete) part
+            for line in lines[:-1]:
+                print(f"Message série complet : {line.strip()}")
+            
+            # Keep the last segment as incomplete if it doesn't end with a newline
+            incomplete_message = lines[-1]
+    except UnicodeDecodeError:
+        print(f"Données brutes reçues : {data.hex()}")
 
-    # Process each line except the last (it might be incomplete)
-    for line in lines[:-1]:
-        print(f"Données reçues : {line.hex()}")
-
-    # Keep the last line as an incomplete message if it's not complete
-    incomplete_message = lines[-1]
 
 async def notification_handler(sender, data):
     """Gère les notifications entrantes en envoyant les données à parseData."""
@@ -65,15 +74,7 @@ async def notification_handler(sender, data):
 
     if is_user_input_active:
         return  # Skip handling if user input is active
-
-    try:
-        message = data.decode('utf-8').strip()
-        if message:
-            print(f"Message série : {message}")
-            return
-    except UnicodeDecodeError:
-        pass
-    
+  
     parse_data(data)
 
 async def find_device():
