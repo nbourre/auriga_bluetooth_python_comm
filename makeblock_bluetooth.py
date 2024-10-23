@@ -19,6 +19,12 @@ END_DATA_OPTIONS = {
 # Global flag to control notification printing
 is_user_input_active = False
 
+'''
+TODO :
+  - Concaténer les messages textes jusqu'à la fin de la ligne
+  - Trouver comment avoir le chrono des tâches (équivalent du millis() en Arduino)
+'''
+
 def calculate_crc(data):
     """Calcule le CRC en effectuant un XOR de tous les octets."""
     crc = 0
@@ -33,9 +39,11 @@ def parse_data(data):
 async def notification_handler(sender, data):
     """Gère les notifications entrantes en envoyant les données à parseData."""
     
-    # global is_user_input_active
-    # if is_user_input_active:
-    #     return  # Skip handling if user input is active
+    """Gère les notifications entrantes en envoyant les données à parseData."""
+    global is_user_input_active
+
+    if is_user_input_active:
+        return  # Skip handling if user input is active
     
     try:
         # Tentative de décodage des données en texte pour détecter les messages Serial.print
@@ -77,19 +85,27 @@ async def listen_for_user_input(client):
     global is_user_input_active
 
     while True:
-        is_user_input_active = True  # Set the flag to pause notifications
-        
+        # Attendre le ":" pour activer l'entrée utilisateur
         user_input = await asyncio.get_event_loop().run_in_executor(None, input, "Entrez des données à envoyer (ou tapez 'quit' pour quitter) : ")
-        is_user_input_active = False  # Clear the flag after processing input
+        
+        if user_input.lower() == ':':
+            is_user_input_active = True
+        
+        # Demander l'entrée de l'utilisateur
+        user_input = await asyncio.get_event_loop().run_in_executor(None, input, "Entrez des données à envoyer (ou tapez 'quit' pour quitter) : ")
         
         if user_input.lower() == 'quit':
             break
+
+        is_user_input_active = False  # Clear the flag after processing input
+        print("[listen_for_user_input] is_user_input_active set to False")
 
         # Envoyer les données saisies par l'utilisateur au robot
         data_to_send = bytearray(user_input, 'utf-8')
         await send_data(client, data_to_send)
 
 async def main():
+    print("Tapez ':' + Entrée pour activer l'entrée utilisateur.")
     async with BleakClient(DEVICE_ADDRESS) as client:
         print(f"Connecté à {DEVICE_ADDRESS}")
 
