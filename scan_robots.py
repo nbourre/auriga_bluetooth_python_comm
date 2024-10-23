@@ -20,17 +20,17 @@ def save_robots_to_csv(robot_dict, file_name="makeblock_robots.csv"):
             reader = csv.reader(file)
             next(reader)  # Skip the header
             for row in reader:
-                if len(row) == 2:
+                if len(row) == 3:  # Check if row includes 'name', 'mac_address', and 'id'
                     existing_robots.add((row[0], row[1]))
 
     with open(file_name, mode='a', newline='') as file:
         writer = csv.writer(file)
         if not file_exists:
-            writer.writerow(['name', 'mac_address'])
+            writer.writerow(['name', 'mac_address', 'id'])  # Include the 'id' column header
         
         for name, address in robot_dict.items():
             if (name, address) not in existing_robots:
-                writer.writerow([name, address])
+                writer.writerow([name, address, ""])  # Leave 'id' field empty for manual filling
 
 async def main():
     all_devices = await scan_devices()
@@ -44,7 +44,7 @@ async def main():
     for name, address in makeblock_devices.items():
         print(f"Device Name: {name}, MAC Address: {address}")
 
-    # Save Makeblock devices to CSV
+    # Save Makeblock devices to CSV with id column
     save_robots_to_csv(makeblock_devices)
 
 # Run the main function
