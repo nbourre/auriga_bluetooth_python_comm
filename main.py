@@ -65,7 +65,7 @@ PORT_4 = 4
 PORT_10 = 10
 
 # Replace with your MakeBlock Ranger's Bluetooth address
-DEVICE_ADDRESS = "00:1B:10:FA:FB:43"
+DEVICE_ADDRESS = "10:A5:62:0A:24:E7"
 CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"  # UUID for notifications
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"  # UUID for writing
 CHARACTERISTIC_READ_UUID = "0000ffe5-0000-1000-8000-00805f9b34fb"  # Example for read characteristic
@@ -131,6 +131,16 @@ def construct_command(idx, action, device, port=None, slot=None, data=None):
 
 # Handler for incoming notifications
 def notification_handler(sender, data):
+    try:
+        # Attempt to decode data as text to detect any Serial.print messages
+        message = data.decode('utf-8').strip()
+        if message:
+            print(f"Serial message: {message}")
+            return
+    except UnicodeDecodeError:
+        # If data is not text, continue processing as usual
+        pass
+    
     # Print received data for debugging
     print(f"Raw data received: {data.hex()}")
 
@@ -180,6 +190,13 @@ async def main():
         #     slot=2
         # )
         
+        # command = construct_command(
+        #     idx=1,
+        #     action=ACTION_GET,
+        #     device=DEVICE_ULTRASONIC_SENSOR,
+        #     port=PORT_10
+        # )
+        
         # Command to set the RGB LED to purple        
         command = construct_command(
             idx=1,
@@ -189,21 +206,21 @@ async def main():
             slot=1,
             data=[10, 20, 0, 20]  # RGB values for purple
         )
-        
-        # command = construct_command(
-        #     idx=1,
-        #     action=ACTION_GET,
-        #     device=DEVICE_ULTRASONIC_SENSOR,
-        #     port=PORT_10
-        # )
+
 
         # Write the command to the characteristic
         await client.write_gatt_char(CHARACTERISTIC_WRITE_UUID, command)
         print(f"Sent command: {command.hex()}")
 
-        # Keep the connection alive to receive notifications
-        await asyncio.sleep(10)
-        await client.stop_notify(CHARACTERISTIC_NOTIFY_UUID)
+        try:
+            print("Waiting for notifications... (Press Ctrl+C to stop)")
+            while True:
+                # Keep the connection alive to receive notifications
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            print("Disconnecting...")
+            await client.stop_notify(CHARACTERISTIC_NOTIFY_UUID)
+        
 
 # Run the main function
 asyncio.run(main())
