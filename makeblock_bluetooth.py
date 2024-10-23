@@ -10,6 +10,7 @@ DEVICE_NAME = "Makeblock_LE001b10672dfc"
 DEVICE_FILE = "last_connected_device.json"
 CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"
+DISCONNECTION_TIMEOUT = 10
 
 # Options de données de fin
 END_DATA_OPTIONS = {
@@ -22,6 +23,7 @@ END_DATA_OPTIONS = {
 # Global variables
 is_user_input_active = False
 incomplete_message = ""
+last_received_time = None
 
 def load_last_device():
     """Load the last connected device from a JSON file."""
@@ -49,6 +51,9 @@ def parse_data(data):
     global incomplete_message
 
     try:
+        # Update the last received time to the current time when data is received
+        last_received_time = asyncio.get_event_loop().time()
+        
         # Decode the received data to string
         message = data.decode('utf-8', errors='ignore')
         incomplete_message += message
@@ -66,6 +71,7 @@ def parse_data(data):
             incomplete_message = lines[-1]
     except UnicodeDecodeError:
         print(f"Données brutes reçues : {data.hex()}")
+
 
 
 async def notification_handler(sender, data):
@@ -92,6 +98,18 @@ async def find_device():
 
     print("Device not found.")
     return None
+
+async def check_disconnection(client):
+    """Periodically check for disconnection based on data reception time."""
+    global last_received_time
+
+    while True:
+        await asyncio.sleep(1)
+        
+        if last_received_time and (asyncio.get_event_loop().time() - last_received_time) > DISCONNECTION_TIMEOUT:
+            print(f"No data received for {DISCONNECTION_TIMEOUT} seconds. Disconnecting...")
+            await client.disconnect()
+            break
 
 async def send_data(client, data, end_data='BOTH'):
     """Envoie des données au robot avec un en-tête et un CRC."""
@@ -146,6 +164,9 @@ async def main():
 
     async with BleakClient(device_address) as client:
         print(f"Connecté à {device_address}")
+        
+        global last_received_time
+        last_received_time = asyncio.get_event_loop().time()
 
         await client.start_notify(CHARACTERISTIC_NOTIFY_UUID, notification_handler)
 
@@ -154,7 +175,11 @@ async def main():
 
             user_input_task = asyncio.create_task(listen_for_user_input(client))
 
-            await user_input_task
+             # Créer une tâche pour vérifier la déconnexion
+            disconnection_task = asyncio.create_task(check_disconnection(client))
+
+            # Garder la connexion active en attendant les notifications et la déconnexion
+            await asyncio.gather(user_input_task, disconnection_task)
 
         except KeyboardInterrupt:
             print("\nDéconnexion en cours...")
