@@ -71,6 +71,26 @@ CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"  # UUID for w
 CHARACTERISTIC_READ_UUID = "0000ffe5-0000-1000-8000-00805f9b34fb"  # Example for read characteristic
 CHARACTERISTIC_INDICATE_UUID = "0000ffe4-0000-1000-8000-00805f9b34fb"  # Example for indication characteristic
 
+# Additional Characteristics
+CHARACTERISTIC_EXTRA_READ_UUIDS = [
+    "0000ffe6-0000-1000-8000-00805f9b34fb",
+    "0000ffe7-0000-1000-8000-00805f9b34fb",
+    "0000ffe8-0000-1000-8000-00805f9b34fb",
+    "0000ffe9-0000-1000-8000-00805f9b34fb",
+    "0000ffea-0000-1000-8000-00805f9b34fb",
+    "0000ffeb-0000-1000-8000-00805f9b34fb",
+    "0000ffec-0000-1000-8000-00805f9b34fb"
+]
+
+CHARACTERISTIC_SECOND_SERVICE_UUIDS = {
+    "service": "9e5d1e47-5c13-43a0-8635-82ad38a1386f",
+    "characteristics": {
+        "write_notify": "e3dd50bf-f7a7-4e99-838e-570a086c666b",
+        "write_only": "92e86c7a-d961-4091-b74f-2409e72efe36",
+        "read_only": "347f7608-2e2d-47eb-913b-75d4edc4de3b"
+    }
+}
+
 '''
 From the MakeBlock Ranger's firmware code
  * \par Function
