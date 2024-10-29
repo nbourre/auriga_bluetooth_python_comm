@@ -6,7 +6,7 @@ import json
 from bleak import BleakClient, BleakScanner, BleakError
 
 # Configuration Bluetooth
-DEVICE_NAME = "Makeblock_LE001b10672dfc"
+DEVICE_NAME = "Makeblock_LE001b10fafb43"
 DEVICE_FILE = "last_connected_device.json"
 CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"  # UUID for notifications
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"  # UUID for writing
@@ -67,7 +67,8 @@ def parse_data(data):
             
             # Process all but the last (possibly incomplete) part
             for line in lines[:-1]:
-                print(f"Message série complet : {line.strip()}")
+                #print(f"Message série complet : {line.strip()}")
+                print(f"{line.strip()}")
             
             # Keep the last segment as incomplete if it doesn't end with a newline
             incomplete_message = lines[-1]
@@ -104,6 +105,7 @@ async def find_device():
 async def handle_disconnect(client: BleakClient):
     """Handle the peripheral disconnection and attempt to reconnect."""
     print("Peripheral device disconnected unexpectedly.")
+    #FIXME : Doesn't reconnect
     attempt = 1
     max_attempts = 5
     connected = False
@@ -186,7 +188,7 @@ async def listen_for_user_input(client):
 
     while True:
         # Prompt the user to activate input mode
-        activation_input = await asyncio.get_event_loop().run_in_executor(None, input, "Tapez ':' puis Entrée pour entrer des données (ou 'quit' pour quitter) : ")
+        activation_input = await asyncio.get_event_loop().run_in_executor(None, input, "Tapez ':' puis Entrée pour entrer des données (ou 'quit' pour quitter) :\n")
         
         if activation_input.lower() == 'quit':
             break
