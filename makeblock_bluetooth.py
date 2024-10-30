@@ -3,13 +3,16 @@ import struct
 import sys
 import platform
 import json
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient, BleakScanner, BleakError
 
 # Configuration Bluetooth
-DEVICE_NAME = "Makeblock_LE001b10672dfc"
+DEVICE_NAME = "Makeblock_LE001b10fafb43"
 DEVICE_FILE = "last_connected_device.json"
-CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"
-CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"
+CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"  # UUID for notifications
+CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"  # UUID for writing
+CHARACTERISTIC_READ_UUID = "0000ffe5-0000-1000-8000-00805f9b34fb"  # Example for read characteristic
+CHARACTERISTIC_INDICATE_UUID = "0000ffe4-0000-1000-8000-00805f9b34fb"  # Example for indication characteristic
+DISCONNECTION_TIMEOUT = 10
 
 # Options de données de fin
 END_DATA_OPTIONS = {
@@ -21,7 +24,8 @@ END_DATA_OPTIONS = {
 
 # Global variables
 is_user_input_active = False
-incomplete_message = b''
+incomplete_message = ""
+last_received_time = None
 
 def load_last_device():
     """Load the last connected device from a JSON file."""
@@ -45,19 +49,33 @@ def calculate_crc(data):
     return crc
 
 def parse_data(data):
-    """Analyse les données reçues du robot (pour l'instant, les affiche simplement)."""
+    """Handle and concatenate fragmented messages."""
     global incomplete_message
 
-    # Concatenate with any previous incomplete message
-    data = incomplete_message + data
-    lines = data.split(b'\n')
+    try:
+        # Update the last received time to the current time when data is received
+        last_received_time = asyncio.get_event_loop().time()
+        
+        # Decode the received data to string
+        message = data.decode('utf-8', errors='ignore')
+        incomplete_message += message
+        
+        # Look for complete messages that end with a newline character
+        if '\n' in incomplete_message:
+            # Split the message on newline to get complete chunks
+            lines = incomplete_message.split('\n')
+            
+            # Process all but the last (possibly incomplete) part
+            for line in lines[:-1]:
+                #print(f"Message série complet : {line.strip()}")
+                print(f"{line.strip()}")
+            
+            # Keep the last segment as incomplete if it doesn't end with a newline
+            incomplete_message = lines[-1]
+    except UnicodeDecodeError:
+        print(f"Données brutes reçues : {data.hex()}")
 
-    # Process each line except the last (it might be incomplete)
-    for line in lines[:-1]:
-        print(f"Données reçues : {line.hex()}")
 
-    # Keep the last line as an incomplete message if it's not complete
-    incomplete_message = lines[-1]
 
 async def notification_handler(sender, data):
     """Gère les notifications entrantes en envoyant les données à parseData."""
@@ -65,15 +83,7 @@ async def notification_handler(sender, data):
 
     if is_user_input_active:
         return  # Skip handling if user input is active
-
-    try:
-        message = data.decode('utf-8').strip()
-        if message:
-            print(f"Message série : {message}")
-            return
-    except UnicodeDecodeError:
-        pass
-    
+  
     parse_data(data)
 
 async def find_device():
@@ -91,6 +101,72 @@ async def find_device():
 
     print("Device not found.")
     return None
+
+async def handle_disconnect(client: BleakClient):
+    """Handle the peripheral disconnection and attempt to reconnect."""
+    print("Peripheral device disconnected unexpectedly.")
+    #FIXME : Doesn't reconnect
+    attempt = 1
+    max_attempts = 5
+    connected = False
+    reconnect_timeout = 10  # Timeout duration in seconds
+    
+    # Attempt to reconnect a few times
+    while attempt <= max_attempts:
+        print(f"Attempting to reconnect... (Attempt {attempt} of {max_attempts})")
+        try:
+            await asyncio.wait_for(client.connect(), timeout=reconnect_timeout)
+            if client.is_connected:
+                print("Reconnected successfully.")
+                connected = True
+                await client.start_notify(CHARACTERISTIC_NOTIFY_UUID, notification_handler)
+                break
+        except asyncio.TimeoutError:
+            print(f"Reconnection attempt {attempt} timed out.")
+        except BleakError as e:
+            print(f"Reconnection attempt {attempt} failed: {e}")
+        except Exception as e:
+            print(f"Unexpected error during reconnection attempt {attempt}: {e}")
+
+        attempt += 1
+        await asyncio.sleep(1)  # Small delay between attempts
+
+    if not connected:
+        print("Failed to reconnect after several attempts. Exiting...")
+
+async def check_connection(client: BleakClient):
+    """Periodically check the connection status."""
+    try:
+        while True:
+            await asyncio.sleep(5)
+            if not client.is_connected:
+                raise BleakError("Device disconnected")
+    except BleakError:
+        await handle_disconnect(client)
+
+
+async def check_connection(client: BleakClient):
+    """Periodically check the connection status."""
+    try:
+        while True:
+            # Attempt a simple read or write operation to verify connection
+            await asyncio.sleep(5)  # Check every 5 seconds
+            if not client.is_connected:
+                raise BleakError("Device disconnected")
+    except BleakError:
+        await handle_disconnect(client)
+
+async def check_disconnection(client):
+    """Periodically check for disconnection based on data reception time."""
+    global last_received_time
+
+    while True:
+        await asyncio.sleep(1)
+        
+        if last_received_time and (asyncio.get_event_loop().time() - last_received_time) > DISCONNECTION_TIMEOUT:
+            print(f"No data received for {DISCONNECTION_TIMEOUT} seconds. Disconnecting...")
+            await client.disconnect()
+            break
 
 async def send_data(client, data, end_data='BOTH'):
     """Envoie des données au robot avec un en-tête et un CRC."""
@@ -112,7 +188,7 @@ async def listen_for_user_input(client):
 
     while True:
         # Prompt the user to activate input mode
-        activation_input = await asyncio.get_event_loop().run_in_executor(None, input, "Tapez ':' puis Entrée pour entrer des données (ou 'quit' pour quitter) : ")
+        activation_input = await asyncio.get_event_loop().run_in_executor(None, input, "Tapez ':' puis Entrée pour entrer des données (ou 'quit' pour quitter) :\n")
         
         if activation_input.lower() == 'quit':
             break
@@ -143,23 +219,28 @@ async def main():
             return
         save_last_device(device_address)
 
-    async with BleakClient(device_address) as client:
-        print(f"Connecté à {device_address}")
+    try:
+        async with BleakClient(device_address, timeout=30.0) as client:
+            print(f"Connecté à {device_address}")
+            
+            global last_received_time
+            last_received_time = asyncio.get_event_loop().time()
 
-        await client.start_notify(CHARACTERISTIC_NOTIFY_UUID, notification_handler)
+            await client.start_notify(CHARACTERISTIC_NOTIFY_UUID, notification_handler)
 
-        try:
-            print("En attente de notifications... (Appuyez sur Ctrl+C pour arrêter)")
-
+            # Créer une tâche pour vérifier la connexion
             user_input_task = asyncio.create_task(listen_for_user_input(client))
 
+            connection_check_task = asyncio.create_task(check_connection(client))
+
+            # Garder la connexion active en attendant les notifications et la déconnexion
             await user_input_task
 
-        except KeyboardInterrupt:
-            print("\nDéconnexion en cours...")
-        finally:
-            await client.stop_notify(CHARACTERISTIC_NOTIFY_UUID)
-            print("Déconnecté.")
+    except BleakError as e:
+        print(f"An error occurred: {str(e)}")
+    except KeyboardInterrupt:
+        print("\nDéconnexion en cours...")
+
 
 # Exécuter la fonction principale
 asyncio.run(main())

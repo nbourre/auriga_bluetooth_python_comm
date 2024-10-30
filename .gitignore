@@ -205,3 +205,5 @@ pip-selfcheck.json
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,venv
+last_connected_device.json
+ble_devices_info.json
