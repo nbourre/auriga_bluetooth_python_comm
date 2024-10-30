@@ -6,7 +6,7 @@ import json
 from bleak import BleakClient, BleakScanner, BleakError
 
 # Configuration Bluetooth
-DEVICE_NAME = "Makeblock_LE001b10fafb43"
+DEVICE_NAME_KEY = "Makeblock_LE001b10fafb43"
 DEVICE_FILE = "last_connected_device.json"
 CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"  # UUID for notifications
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"  # UUID for writing
@@ -28,18 +28,18 @@ incomplete_message = ""
 last_received_time = None
 
 def load_last_device():
-    """Load the last connected device from a JSON file."""
+    """Load the last connected device name from a JSON file."""
     try:
         with open(DEVICE_FILE, 'r') as f:
             data = json.load(f)
-            return data.get("device_address")
+            return data.get(DEVICE_NAME_KEY)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 
-def save_last_device(device_address):
-    """Save the last connected device to a JSON file."""
+def save_last_device(device_name):
+    """Save the last connected device name to a JSON file."""
     with open(DEVICE_FILE, 'w') as f:
-        json.dump({"device_address": device_address}, f)
+        json.dump({DEVICE_NAME_KEY: device_name}, f)
 
 def calculate_crc(data):
     """Calcule le CRC en effectuant un XOR de tous les octets."""
@@ -86,18 +86,13 @@ async def notification_handler(sender, data):
   
     parse_data(data)
 
-async def find_device():
-    """Scan and find the MakeBlock Ranger based on the OS."""
+async def find_device(device_name):
+    """Scan and find the MakeBlock Ranger based on the provided device name."""
     devices = await BleakScanner.discover()
     for device in devices:
-        if platform.system() == "Darwin":  # Check if it's macOS
-            if device.name == DEVICE_NAME:
-                print(f"Device found on macOS: {device.name}, UUID: {device.address}")
-                return device.address
-        else:
-            if device.name == DEVICE_NAME and ":" in device.address:  # Match MAC address on Windows
-                print(f"Device found on Windows: {device.name}, MAC: {device.address}")
-                return device.address
+        if device.name == device_name:
+            print(f"Device found: {device.name}, Address: {device.address}")
+            return device.address
 
     print("Device not found.")
     return None
@@ -211,13 +206,20 @@ async def listen_for_user_input(client):
 async def main():
     print("Tapez ':' pour activer l'entrée utilisateur.")
     
-    device_address = load_last_device()
-    if not device_address:
-        device_address = await find_device()
-        if not device_address:
-            print("Unable to find the device.")
+    device_name = load_last_device()
+    if not device_name:
+        print("No saved device name found.")
+        device_name = input("Enter the device name to connect to: ")
+        if not device_name:
+            print("No device name provided. Exiting...")
             return
-        save_last_device(device_address)
+
+    device_address = await find_device(device_name)
+    if not device_address:
+        print("Unable to find the device.")
+        return
+    save_last_device(device_name)
+
 
     try:
         async with BleakClient(device_address, timeout=30.0) as client:
