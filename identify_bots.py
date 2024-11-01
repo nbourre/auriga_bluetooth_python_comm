@@ -6,7 +6,7 @@ from bleak import BleakScanner, BleakClient
 # Configuration
 MAKEBLOCK_PREFIX = "Makeblock_LE"
 BEEP_COMMAND = bytearray([0xFF, 0x55, 0x39, 0x39, 0x39, 0x39])  # Example beep command (adjust if needed)
-WAIT_TIME = 3  # Time in seconds to wait after each beep
+WAIT_TIME = 10  # Time in seconds to wait after each beep
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"  # UUID for writing
 
 async def beep_robot(address, name):
