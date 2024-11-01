@@ -2,6 +2,7 @@ from bleak import BleakScanner
 import asyncio
 import csv
 import os
+import platform
 
 async def scan_devices():
     devices = await BleakScanner.discover()
@@ -11,26 +12,51 @@ async def scan_devices():
 def filter_makeblock_devices(device_dict):
     return {name: address for name, address in device_dict.items() if name.startswith("Makeblock")}
 
+import csv
+import os
+import platform
+
 def save_robots_to_csv(robot_dict, file_name="makeblock_robots.csv"):
     file_exists = os.path.isfile(file_name)
     
-    existing_robots = set()
+    # Read existing robots into a dictionary for easier updating
+    existing_robots = {}
     if file_exists:
         with open(file_name, mode='r', newline='') as file:
             reader = csv.reader(file)
             next(reader)  # Skip the header
             for row in reader:
-                if len(row) == 3:  # Check if row includes 'name', 'mac_address', and 'id'
-                    existing_robots.add((row[0], row[1]))
+                name, mac_address, macos_id, robot_id = row
+                existing_robots[name] = {
+                    "mac_address": mac_address,
+                    "macos_id": macos_id,
+                    "id": robot_id
+                }
 
-    with open(file_name, mode='a', newline='') as file:
+    # Update or add robots to the CSV file
+    with open(file_name, mode='w', newline='') as file:
         writer = csv.writer(file)
-        if not file_exists:
-            writer.writerow(['name', 'mac_address', 'id'])  # Include the 'id' column header
-        
+        writer.writerow(['name', 'mac_address', 'macos_id', 'id'])  # Write header
+
+        # Merge new robots with existing ones
         for name, address in robot_dict.items():
-            if (name, address) not in existing_robots:
-                writer.writerow([name, address, ""])  # Leave 'id' field empty for manual filling
+            if name in existing_robots:
+                # Update `mac_address` or `macos_id` only if missing or different
+                if platform.system() == 'Darwin':
+                    existing_robots[name]['macos_id'] = address
+                else:
+                    existing_robots[name]['mac_address'] = address
+            else:
+                # Add new robots based on platform
+                if platform.system() == 'Darwin':
+                    existing_robots[name] = {"mac_address": "", "macos_id": address, "id": ""}
+                else:
+                    existing_robots[name] = {"mac_address": address, "macos_id": "", "id": ""}
+
+        # Write all entries to the CSV file
+        for name, info in existing_robots.items():
+            writer.writerow([name, info["mac_address"], info["macos_id"], info["id"]])
+
 
 async def main():
     all_devices = await scan_devices()
