@@ -33,6 +33,9 @@ def save_robots_to_csv(robot_dict, file_name="makeblock_robots.csv"):
             next(reader)  # Skip the header
             for row in reader:
                 name, mac_address, macos_id, robot_id = row
+                if mac_address == "":
+                    mac_address = get_mac_address_from_name(name)
+                
                 existing_robots[name] = {
                     "mac_address": mac_address,
                     "macos_id": macos_id,
