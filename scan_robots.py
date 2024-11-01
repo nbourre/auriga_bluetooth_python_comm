@@ -12,9 +12,15 @@ async def scan_devices():
 def filter_makeblock_devices(device_dict):
     return {name: address for name, address in device_dict.items() if name.startswith("Makeblock")}
 
-import csv
-import os
-import platform
+def get_mac_address_from_name(robot_name):
+    """Extracts and returns the MAC address from the given robot name."""
+    if robot_name.startswith("Makeblock_LE"):
+        # Extract the MAC address part after 'Makeblock_LE' and insert colons
+        embedded_mac = robot_name[len("Makeblock_LE"):]
+        # Format MAC address as 'XX:XX:XX:XX:XX:XX'
+        mac_address = ':'.join(embedded_mac[i:i+2] for i in range(0, len(embedded_mac), 2))
+        return mac_address
+    return None
 
 def save_robots_to_csv(robot_dict, file_name="makeblock_robots.csv"):
     file_exists = os.path.isfile(file_name)
@@ -44,12 +50,16 @@ def save_robots_to_csv(robot_dict, file_name="makeblock_robots.csv"):
                 # Update `mac_address` or `macos_id` only if missing or different
                 if platform.system() == 'Darwin':
                     existing_robots[name]['macos_id'] = address
+                    # If `mac_address` is missing, extract it from the name
+                    if not existing_robots[name]['mac_address']:
+                        existing_robots[name]['mac_address'] = get_mac_address_from_name(name)
                 else:
                     existing_robots[name]['mac_address'] = address
             else:
                 # Add new robots based on platform
                 if platform.system() == 'Darwin':
-                    existing_robots[name] = {"mac_address": "", "macos_id": address, "id": ""}
+                    mac_address = get_mac_address_from_name(name)
+                    existing_robots[name] = {"mac_address": mac_address, "macos_id": address, "id": ""}
                 else:
                     existing_robots[name] = {"mac_address": address, "macos_id": "", "id": ""}
 
