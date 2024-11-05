@@ -6,7 +6,8 @@ import json
 from bleak import BleakClient, BleakScanner, BleakError
 
 # Configuration Bluetooth
-DEVICE_NAME_KEY = "Makeblock_LE001b10672eaf"
+DEVICE_NAME = "Makeblock_LE001b10fafb43"
+DEVICE_NAME_KEY = "device_name"
 DEVICE_FILE = "last_connected_device.json"
 CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"  # UUID for notifications
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"  # UUID for writing
