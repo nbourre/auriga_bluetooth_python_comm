@@ -123,18 +123,7 @@ void handleCommandWithParams(String command, String params) {
       Serial.print(F("Commande FORWARD reçue avec paramètres : "));
       Serial.println(params);
 
-      // Découpage des paramètres
-      int commaIndex;
-      while ((commaIndex = params.indexOf(',')) != -1) {
-        String param = params.substring(0, commaIndex);
-        Serial.print(F("Paramètre : "));
-        Serial.println(param);
-        params = params.substring(commaIndex + 1);
-      }
-      // Dernier paramètre
-      Serial.print(F("Dernier paramètre : "));
-      Serial.println(params);
-      // Ajouter le code pour traiter la commande FORWARD avec ses paramètres
+      commandForward(params);
       break;
 
     case 'l':  // Commande "LIGHT" pour définir la couleur de l'anneau LED
@@ -205,6 +194,13 @@ void commandLight(String params) {
   else {
     Serial.println(F("Commande lumière invalide"));
   }
+}
+
+void commandForward(String params) {
+    // paramètre
+    Serial.print(F("Paramètre : "));
+    Serial.println(params);
+    // Ajouter le code pour traiter la commande FORWARD avec ses paramètres
 }
 
 #pragma endregion
