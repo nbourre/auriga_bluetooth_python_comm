@@ -181,9 +181,6 @@ void commandBeep() {
 void commandLight(String params) {
   int commaCount = countCharOccurrences(params, ',');
   
-  Serial.print("Nb params : ");
-  Serial.println (commaCount + 1);
-
   // Vérifie le nombre de paramètres en comptant les virgules
   if (commaCount == 2) {
     // Trois paramètres (r, g, b) pour définir toute la couleur de l'anneau
