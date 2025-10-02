@@ -204,6 +204,47 @@ pip-selfcheck.json
 .history
 .ionide
 
-# End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,venv
+# End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,venv  
+
+# Project specific files
 last_connected_device.json
 ble_devices_info.json
+
+# .NET Core / .NET Framework (for WIP folder)
+wip/**/bin/
+wip/**/obj/
+wip/**/*.dll
+wip/**/*.exe
+wip/**/*.pdb
+wip/**/*.cache
+wip/**/*.tmp
+wip/**/[Dd]ebug/
+wip/**/[Dd]ebugPublic/
+wip/**/[Rr]elease/
+wip/**/[Rr]eleases/
+wip/**/x64/
+wip/**/x86/
+wip/**/*.user
+wip/**/*.suo
+wip/**/*.userprefs
+wip/**/.vs/
+wip/**/*_wpftmp.csproj
+wip/**/*.log
+wip/**/project.lock.json
+wip/**/project.fragment.lock.json
+wip/**/*.nuget.props
+wip/**/*.nuget.targets
+
+# Arduino build files
+*.hex
+*.elf
+*.map
+
+# Excel temporary files
+~$*.xlsx
+~$*.xls
+
+# Backup files
+*.bak
+*.backup
+*~
