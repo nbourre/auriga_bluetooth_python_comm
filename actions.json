@@ -1,0 +1,24 @@
+{
+  "directions": {
+    "w": "F",
+    "a": "L",
+    "s": "B",
+    "d": "R",
+    "stop": "DIR_STOP"
+  },
+  "actions": [
+    {
+      "key": "q",
+      "data": "LIGHT_TOGGLE",
+      "label": "Toggle light"
+    },
+    {
+      "key": "e",
+      "data": [
+        1,
+        255
+      ],
+      "label": "Special Command"
+    }
+  ]
+}
