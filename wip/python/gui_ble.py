@@ -200,9 +200,9 @@ class Application(tk.Tk):
             self.after(0, self.update_device_dropdown, device_names)
             
         except Exception as e:
-            self.after(0, lambda: self.safe_update_text(f"Scan error: {e}\n"))
+            self.after(0, lambda e=e: self.safe_update_text(f"Scan error: {e}\n"))
         finally:
-            self.after(0, lambda: self.scan_button.config(state="normal", text="Scan Devices"))
+            self.after(0, lambda e=e: self.scan_button.config(state="normal", text="Scan Devices"))
     
     def update_device_dropdown(self, device_names):
         """Update the device dropdown with discovered devices."""
@@ -322,10 +322,10 @@ class Application(tk.Tk):
                 self.after(0, lambda: self.status_label.config(text="Status: Connection failed"))
                 
         except Exception as e:
-            self.after(0, lambda: self.safe_update_text(f"Failed to connect to {device_name}: {e}\n"))
-            self.after(0, lambda: self.status_label.config(text="Status: Connection error"))
+            self.after(0, lambda e=e: self.safe_update_text(f"Failed to connect to {device_name}: {e}\n"))
+            self.after(0, lambda e=e: self.status_label.config(text="Status: Connection error"))
         finally:
-            self.after(0, lambda: self.connect_button.config(state="normal", text="Connect"))
+            self.after(0, lambda e=e: self.connect_button.config(state="normal", text="Connect"))
             
     async def listen_for_notifications(self):
         """Start listening for notifications from the connected device."""
