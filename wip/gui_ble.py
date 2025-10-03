@@ -2,8 +2,10 @@ import tkinter as tk
 from tkinter import ttk
 import json
 import os
+import time
 from bleak import BleakClient, BleakScanner, BleakError
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 DEVICE_NAME_KEY = "device_name"
@@ -62,18 +64,47 @@ class Application(tk.Tk):
         self.title("BLE Communication App")
         self.geometry("600x450")
         
-        self.executor = ThreadPoolExecutor(max_workers=1)
-        self.loop = asyncio.get_event_loop()
-        
         # Initialize BLE client and discovered devices
         self.ble_client = None
         self.discovered_devices = {}
+        
+        # Create a dedicated thread for asyncio operations
+        self.asyncio_thread = None
+        self.loop = None
+        self.loop_running = False
+        
+        # Start the asyncio event loop in a separate thread
+        self.start_asyncio_thread()
 
         # Create the controls
         self.create_controls()
         
         # Load the last connected device name if available
         self.load_last_connected_device()
+    
+    def start_asyncio_thread(self):
+        """Start the asyncio event loop in a separate thread."""
+        def run_loop():
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+            self.loop_running = True
+            try:
+                self.loop.run_forever()
+            finally:
+                self.loop_running = False
+        
+        self.asyncio_thread = threading.Thread(target=run_loop, daemon=True)
+        self.asyncio_thread.start()
+        
+        # Wait a bit for the loop to start
+        time.sleep(0.1)
+    
+    def run_in_loop(self, coro):
+        """Schedule a coroutine to run in the asyncio loop."""
+        if self.loop and self.loop_running:
+            future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+            return future
+        return None
     
     def create_controls(self):
         # Create a frame to hold the controls
@@ -143,19 +174,15 @@ class Application(tk.Tk):
     def start_scan_devices(self):
         """Start the device scanning process in a separate thread."""
         self.scan_button.config(state="disabled", text="Scanning...")
-        self.executor.submit(self.run_async_scan)
-    
-    def run_async_scan(self):
-        """Run the async scan in the event loop."""
-        asyncio.run(self.scan_devices())
+        self.run_in_loop(self.scan_devices())
     
     async def scan_devices(self):
         """Scan for BLE devices and populate the dropdown."""
+        timeout = 10.0
         try:
-            self.received_data_text.insert(tk.END, "Scanning for devices...\n")
-            self.received_data_text.see(tk.END)
-            
-            devices = await BleakScanner.discover(timeout=10.0)
+            self.after(0, lambda: self.safe_update_text(f"Scanning for devices for {timeout} seconds...\n"))
+
+            devices = await BleakScanner.discover(timeout=timeout)
             self.discovered_devices = {}
             device_names = []
             
@@ -173,7 +200,7 @@ class Application(tk.Tk):
             self.after(0, self.update_device_dropdown, device_names)
             
         except Exception as e:
-            self.after(0, lambda: self.received_data_text.insert(tk.END, f"Scan error: {e}\n"))
+            self.after(0, lambda: self.safe_update_text(f"Scan error: {e}\n"))
         finally:
             self.after(0, lambda: self.scan_button.config(state="normal", text="Scan Devices"))
     
@@ -181,10 +208,9 @@ class Application(tk.Tk):
         """Update the device dropdown with discovered devices."""
         self.device_dropdown['values'] = sorted(device_names)
         if device_names:
-            self.received_data_text.insert(tk.END, f"Found {len(device_names)} devices.\n")
+            self.safe_update_text(f"Found {len(device_names)} devices.\n")
         else:
-            self.received_data_text.insert(tk.END, "No devices found.\n")
-        self.received_data_text.see(tk.END)
+            self.safe_update_text("No devices found.\n")
     
     def on_device_selected(self, event=None):
         """Handle device selection from dropdown."""
@@ -215,20 +241,12 @@ class Application(tk.Tk):
             return
             
         self.connect_button.config(state="disabled", text="Connecting...")
-        self.executor.submit(self.run_async_connect, device_name, device_address)
-    
-    def run_async_connect(self, device_name, device_address=None):
-        """Run the async connection in the event loop."""
-        asyncio.run(self.async_connect_device(device_name, device_address))
+        self.run_in_loop(self.async_connect_device(device_name, device_address))
     
     def start_disconnect_device(self):
         """Start the disconnection process in a separate thread."""
         self.disconnect_button.config(state="disabled", text="Disconnecting...")
-        self.executor.submit(self.run_async_disconnect)
-    
-    def run_async_disconnect(self):
-        """Run the async disconnection in the event loop."""
-        asyncio.run(self.disconnect_device())
+        self.run_in_loop(self.disconnect_device())
         
     def load_last_connected_device(self):
         try:
@@ -255,10 +273,23 @@ class Application(tk.Tk):
 
     def on_closing(self):
         """Handle application closing."""
-        if self.ble_client and self.ble_client.is_connected:
+        try:
             # Disconnect from device before closing
-            asyncio.run(self.ble_client.disconnect())
-        self.executor.shutdown(wait=False)
+            if self.ble_client and self.ble_client.is_connected:
+                future = self.run_in_loop(self.ble_client.disconnect())
+                if future:
+                    future.result(timeout=2.0)  # Wait max 2 seconds for disconnect
+        except Exception as e:
+            print(f"Error during disconnect: {e}")
+        
+        # Stop the asyncio loop
+        if self.loop and self.loop_running:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        
+        # Wait for the asyncio thread to finish
+        if self.asyncio_thread and self.asyncio_thread.is_alive():
+            self.asyncio_thread.join(timeout=1.0)
+        
         self.destroy()
             
     async def async_connect_device(self, device_name, device_address=None):
@@ -267,7 +298,7 @@ class Application(tk.Tk):
             if not device_address:
                 address = await self.find_device(device_name)
                 if not address:
-                    self.after(0, lambda: self.received_data_text.insert(tk.END, f"Device '{device_name}' not found.\n"))
+                    self.after(0, lambda: self.safe_update_text(f"Device '{device_name}' not found.\n"))
                     return
             else:
                 address = device_address
@@ -280,20 +311,18 @@ class Application(tk.Tk):
             await self.ble_client.connect()
             
             if self.ble_client.is_connected:
-                self.after(0, lambda: self.received_data_text.insert(tk.END, f"Connected to {device_name} ({address}).\n"))
-                self.after(0, lambda: self.received_data_text.see(tk.END))
+                self.after(0, lambda: self.safe_update_text(f"Connected to {device_name} ({address}).\n"))
                 self.after(0, lambda: self.status_label.config(text=f"Status: Connected to {device_name}"))
                 self.save_last_connected_device(device_name)
                 
                 # Start listening for notifications
                 await self.listen_for_notifications()
             else:
-                self.after(0, lambda: self.received_data_text.insert(tk.END, f"Failed to connect to {device_name}.\n"))
+                self.after(0, lambda: self.safe_update_text(f"Failed to connect to {device_name}.\n"))
                 self.after(0, lambda: self.status_label.config(text="Status: Connection failed"))
                 
         except Exception as e:
-            self.after(0, lambda: self.received_data_text.insert(tk.END, f"Failed to connect to {device_name}: {e}\n"))
-            self.after(0, lambda: self.received_data_text.see(tk.END))
+            self.after(0, lambda: self.safe_update_text(f"Failed to connect to {device_name}: {e}\n"))
             self.after(0, lambda: self.status_label.config(text="Status: Connection error"))
         finally:
             self.after(0, lambda: self.connect_button.config(state="normal", text="Connect"))
@@ -301,15 +330,28 @@ class Application(tk.Tk):
     async def listen_for_notifications(self):
         """Start listening for notifications from the connected device."""
         def handle_notification(sender, data):
-            # Use after() to safely update GUI from notification callback
-            self.after(0, lambda: self.received_data_text.insert(tk.END, f"Received: {data.decode('utf-8', errors='ignore')}\n"))
-            self.after(0, lambda: self.received_data_text.see(tk.END))
+            try:
+                # Use after() to safely update GUI from notification callback
+                if self.winfo_exists():  # Check if window still exists
+                    decoded_data = data.decode('utf-8', errors='ignore')
+                    self.after(0, lambda: self.safe_update_text(f"Received: {decoded_data}\n"))
+            except Exception as e:
+                print(f"Notification handler error: {e}")
         
         try:
             await self.ble_client.start_notify(CHARACTERISTIC_NOTIFY_UUID, handle_notification)
-            self.after(0, lambda: self.received_data_text.insert(tk.END, "Started listening for notifications.\n"))
+            self.after(0, lambda: self.safe_update_text("Started listening for notifications.\n"))
         except Exception as e:
-            self.after(0, lambda: self.received_data_text.insert(tk.END, f"Failed to start notifications: {e}\n"))
+            self.after(0, lambda: self.safe_update_text(f"Failed to start notifications: {e}\n"))
+    
+    def safe_update_text(self, text):
+        """Safely update the text widget."""
+        try:
+            if self.winfo_exists():
+                self.received_data_text.insert(tk.END, text)
+                self.received_data_text.see(tk.END)
+        except Exception as e:
+            print(f"GUI update error: {e}")
 
     def save_last_connected_device(self, device_name):
         with open("last_connected_device.json", "w") as f:
@@ -325,39 +367,32 @@ class Application(tk.Tk):
                 end_data = END_DATA_OPTIONS[line_ending]
                 full_message = message.encode("utf-8") + end_data
                 
-                # Send message in a separate thread
-                self.executor.submit(self.run_async_send, full_message, message)
+                # Send message using the asyncio loop
+                self.run_in_loop(self.async_send_message(full_message, message))
                 self.message_entry.delete(0, tk.END)
             else:
-                self.received_data_text.insert(tk.END, "Please enter a message to send.\n")
+                self.safe_update_text("Please enter a message to send.\n")
         else:
-            self.received_data_text.insert(tk.END, "Not connected to any device.\n")
-    
-    def run_async_send(self, full_message, original_message):
-        """Run the async send in the event loop."""
-        asyncio.run(self.async_send_message(full_message, original_message))
+            self.safe_update_text("Not connected to any device.\n")
     
     async def async_send_message(self, full_message, original_message):
         """Send message asynchronously."""
         try:
             await self.ble_client.write_gatt_char(CHARACTERISTIC_WRITE_UUID, full_message)
-            self.after(0, lambda: self.received_data_text.insert(tk.END, f"Sent: {original_message}\n"))
-            self.after(0, lambda: self.received_data_text.see(tk.END))
+            self.after(0, lambda: self.safe_update_text(f"Sent: {original_message}\n"))
         except Exception as e:
-            self.after(0, lambda: self.received_data_text.insert(tk.END, f"Send error: {e}\n"))
-            self.after(0, lambda: self.received_data_text.see(tk.END))
+            self.after(0, lambda: self.safe_update_text(f"Send error: {e}\n"))
 
     async def disconnect_device(self):
         try:
             if self.ble_client and self.ble_client.is_connected:
                 await self.ble_client.disconnect()
-                self.after(0, lambda: self.received_data_text.insert(tk.END, "Disconnected.\n"))
-                self.after(0, lambda: self.received_data_text.see(tk.END))
+                self.after(0, lambda: self.safe_update_text("Disconnected.\n"))
                 self.after(0, lambda: self.status_label.config(text="Status: Disconnected"))
             else:
-                self.after(0, lambda: self.received_data_text.insert(tk.END, "No active connection to disconnect.\n"))
+                self.after(0, lambda: self.safe_update_text("No active connection to disconnect.\n"))
         except Exception as e:
-            self.after(0, lambda: self.received_data_text.insert(tk.END, f"Disconnect error: {e}\n"))
+            self.after(0, lambda: self.safe_update_text(f"Disconnect error: {e}\n"))
             self.after(0, lambda: self.status_label.config(text="Status: Disconnect error"))
         finally:
             self.after(0, lambda: self.disconnect_button.config(state="normal", text="Disconnect"))

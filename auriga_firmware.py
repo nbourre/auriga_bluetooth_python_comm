@@ -65,7 +65,9 @@ PORT_4 = 4
 PORT_10 = 10
 
 # Replace with your MakeBlock Ranger's Bluetooth address
+# Makeblock_LE10a5622dd32e
 DEVICE_ADDRESS = "10:A5:62:0A:24:E7"
+DEVICE_ADDRESS = "10:A5:62:2D:D3:2E"  # Change this to your device's address
 CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"  # UUID for notifications
 CHARACTERISTIC_WRITE_UUID = "0000ffe3-0000-1000-8000-00805f9b34fb"  # UUID for writing
 CHARACTERISTIC_READ_UUID = "0000ffe5-0000-1000-8000-00805f9b34fb"  # Example for read characteristic
