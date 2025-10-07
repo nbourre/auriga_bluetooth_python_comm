@@ -50,13 +50,6 @@ This project includes two GUI applications for interacting with BLE devices:
 4. **Receive messages**:
    - Incoming messages appear automatically in the main text area
 
-### Configuration
-The application uses `actions.json` for header configuration:
-```json
-{
-  "header": [255, 85]
-}
-```
 
 ## gui_ble_wasd.py - Advanced Robot Controller
 
