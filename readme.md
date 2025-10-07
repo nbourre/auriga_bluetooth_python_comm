@@ -11,6 +11,7 @@ To test the code, you will need to have the following installed:
 - Test the by changing the commented commands.
 
 # GUI Applications
+**AI generated content**
 
 This project includes two GUI applications for interacting with BLE devices:
 
