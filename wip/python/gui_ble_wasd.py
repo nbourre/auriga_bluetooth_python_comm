@@ -28,6 +28,7 @@ END_DATA_OPTIONS = {
 }
 
 DEFAULT_FREQUENCY_HZ = 10  # default global frequency for WASD
+DEFAULT_HEADER = [0xFF, 0x55]  # default header bytes
 
 # -----------------------------
 # Helpers to convert configured payloads to bytes
@@ -72,11 +73,13 @@ class Application(tk.Tk):
         self.config_directions: Dict[str, PayloadType] = {}
         self.config_stop: Optional[PayloadType] = None
         self.config_actions: List[Dict[str, Any]] = []
+        self.config_header: List[int] = DEFAULT_HEADER.copy()
 
         # Keyboard control state
         self.keyboard_enabled_var = tk.BooleanVar(value=True)  # checkbox
         self.frequency_var = tk.StringVar(value=str(DEFAULT_FREQUENCY_HZ))
         self.line_endings_var = tk.StringVar(value="BOTH")
+        self.use_header_var = tk.BooleanVar(value=False)  # header option
 
         # Key tracking (avoid autorepeat flood)
         self._pressed_keys: set[str] = set()
@@ -92,6 +95,9 @@ class Application(tk.Tk):
         # Build UI
         self._build_ui()
         self._bind_keys()
+        
+        # Set initial state of message entry based on keyboard control
+        self._on_keyboard_control_changed()
 
         # Load persisted device + actions.json at startup
         self._load_last_connected_device()
@@ -174,6 +180,9 @@ class Application(tk.Tk):
         self.line_endings_dropdown = ttk.Combobox(msg_row, textvariable=self.line_endings_var, values=["NL","CR","BOTH","NONE"], width=6, state="readonly")
         self.line_endings_dropdown.pack(side=tk.LEFT, padx=6)
 
+        self.header_checkbox = tk.Checkbutton(msg_row, text="Header", variable=self.use_header_var)
+        self.header_checkbox.pack(side=tk.LEFT, padx=6)
+
         self.send_button = tk.Button(msg_row, text="Send", command=self._send_manual_message)
         self.send_button.pack(side=tk.LEFT)
 
@@ -181,7 +190,7 @@ class Application(tk.Tk):
         kb_row = tk.Frame(top)
         kb_row.pack(side=tk.TOP, fill=tk.X, pady=(10, 0))
 
-        self.kb_checkbox = tk.Checkbutton(kb_row, text="Enable Keyboard Control (W/A/S/D + action keys)", variable=self.keyboard_enabled_var)
+        self.kb_checkbox = tk.Checkbutton(kb_row, text="Enable Keyboard Control (W/A/S/D + action keys)", variable=self.keyboard_enabled_var, command=self._on_keyboard_control_changed)
         self.kb_checkbox.pack(side=tk.LEFT)
 
         freq_frame = tk.Frame(kb_row)
@@ -209,6 +218,15 @@ class Application(tk.Tk):
         # Bind on the toplevel so it catches regardless of focus, but we respect the checkbox
         self.bind_all("<KeyPress>", self._on_key_press, add=True)
         self.bind_all("<KeyRelease>", self._on_key_release, add=True)
+    
+    def _on_keyboard_control_changed(self) -> None:
+        """Called when the keyboard control checkbox state changes."""
+        if self.keyboard_enabled_var.get():
+            # Keyboard control enabled - disable text entry
+            self.message_entry.config(state="disabled")
+        else:
+            # Keyboard control disabled - enable text entry
+            self.message_entry.config(state="normal")
 
     # -----------------------------
     # Placeholder helpers
@@ -357,14 +375,25 @@ class Application(tk.Tk):
             return
         end = END_DATA_OPTIONS.get(self.line_endings_var.get(), b'')
         data = msg.encode('utf-8') + end
+        use_header = self.use_header_var.get()
         self.run_in_loop(self._async_write(data))
-        self._append_text(f"Sent: {msg}\n")
+        
+        header_info = f" (with header {self.config_header})" if use_header else ""
+        self._append_text(f"Sent: {msg}{header_info}\n")
         self.message_entry.delete(0, tk.END)
 
-    async def _async_write(self, payload: bytes) -> None:
+    async def _async_write(self, payload: bytes, use_header: bool = None) -> None:
         try:
             if self.ble_client:
-                await self.ble_client.write_gatt_char(CHARACTERISTIC_WRITE_UUID, payload)
+                # Use parameter if provided, otherwise use GUI checkbox
+                add_header = use_header if use_header is not None else self.use_header_var.get()
+                
+                final_payload = payload
+                if add_header and self.config_header:
+                    header_bytes = bytes(self.config_header)
+                    final_payload = header_bytes + payload
+                    
+                await self.ble_client.write_gatt_char(CHARACTERISTIC_WRITE_UUID, final_payload)
         except Exception as e:
             self._append_text(f"Send error: {e}\n")
 
@@ -379,6 +408,7 @@ class Application(tk.Tk):
         except FileNotFoundError:
             # create a minimal template if missing
             cfg = {
+                "header": [255, 85],
                 "directions": {"w": "F", "a": "L", "s": "B", "d": "R", "stop": "DIR_STOP"},
                 "actions": [
                     {"key": "q", "data": "LIGHT_TOGGLE", "label": "Toggle Light"},
@@ -397,6 +427,13 @@ class Application(tk.Tk):
             self.config_directions = {k: dirs[k] for k in ("w","a","s","d")}
             self.config_stop = stop
 
+            # Load header configuration
+            header_cfg = cfg.get("header", DEFAULT_HEADER)
+            if isinstance(header_cfg, list) and all(isinstance(x, int) for x in header_cfg):
+                self.config_header = header_cfg
+            else:
+                self.config_header = DEFAULT_HEADER.copy()
+
             actions_raw = cfg.get("actions", [])
             self.config_actions = []
             for item in actions_raw:
@@ -409,7 +446,8 @@ class Application(tk.Tk):
                     "label": item.get("label", key.upper())
                 })
             self._rebuild_actions_panel()
-            self._append_text("Actions loaded.\n")
+            header_hex = ' '.join(f'0x{b:02X}' for b in self.config_header)
+            self._append_text(f"Actions loaded. Header configured: [{header_hex}]\n")
         except Exception as e:
             messagebox.showerror("actions.json error", str(e))
 

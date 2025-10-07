@@ -1,0 +1,27 @@
+{
+  "header": [255, 85],
+  "directions": {
+    "w": "F",
+    "a": "L", 
+    "s": "B",
+    "d": "R",
+    "stop": "DIR_STOP"
+  },
+  "actions": [
+    {
+      "key": "q",
+      "data": "LIGHT_TOGGLE",
+      "label": "Toggle Light"
+    },
+    {
+      "key": "e", 
+      "data": [255, 85, 2, 0],
+      "label": "Special Command"
+    },
+    {
+      "key": "r",
+      "data": "BEEP",
+      "label": "Beep Sound"
+    }
+  ]
+}
