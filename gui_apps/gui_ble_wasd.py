@@ -37,9 +37,10 @@ PayloadType = Union[str, int, List[int]]
 
 def to_bytes(payload: PayloadType) -> bytes:
     """Convert a payload (string/char/int list) to bytes.
-    - str: utf-8 encoded
-    - int: single byte (0..255)
-    - List[int]: sequence of bytes
+    This helper function converts various data types to bytes for BLE transmission:
+    - str: utf-8 encoded (e.g., "HELLO" -> b'HELLO')
+    - int: single byte (0..255) (e.g., 255 -> b'\xff')
+    - List[int]: sequence of bytes (e.g., [255, 85] -> b'\xff\x55')
     """
     if isinstance(payload, str):
         return payload.encode('utf-8')
@@ -54,6 +55,10 @@ def to_bytes(payload: PayloadType) -> bytes:
 # -----------------------------
 class Application(tk.Tk):
     def __init__(self) -> None:
+        """Initialize the BLE Robot Controller application.
+        Sets up the main window, initializes all variables, starts background threads,
+        builds the UI, and loads saved configuration.
+        """
         super().__init__()
         self.title("BLE Robot Controller")
         self.geometry("780x560")
@@ -107,6 +112,10 @@ class Application(tk.Tk):
     # Asyncio loop thread
     # -----------------------------
     def start_asyncio_thread(self) -> None:
+        """Start a dedicated thread for asyncio operations.
+        This creates a separate event loop that runs in its own thread,
+        allowing BLE operations to run asynchronously without blocking the GUI.
+        """
         def run_loop():
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
@@ -120,6 +129,15 @@ class Application(tk.Tk):
         time.sleep(0.1)
 
     def run_in_loop(self, coro):
+        """Schedule a coroutine to run in the asyncio thread.
+        This safely executes async BLE operations from the main GUI thread
+        by scheduling them in the dedicated asyncio event loop.
+        
+        Args:
+            coro: The coroutine to execute
+        Returns:
+            Future object or None if loop is not running
+        """
         if self.loop and self.loop_running:
             return asyncio.run_coroutine_threadsafe(coro, self.loop)
         return None
@@ -128,6 +146,10 @@ class Application(tk.Tk):
     # UI
     # -----------------------------
     def _build_ui(self) -> None:
+        """Build the complete user interface.
+        Creates all GUI elements including device scanning, connection controls,
+        message sending, keyboard control options, action buttons, and data display.
+        """
         top = tk.Frame(self)
         top.pack(side=tk.TOP, fill=tk.X, padx=8, pady=8)
 
@@ -215,12 +237,19 @@ class Application(tk.Tk):
         self.received_data_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=8)
 
     def _bind_keys(self) -> None:
+        """Bind keyboard events for WASD and action key controls.
+        Sets up global key press/release handlers that work regardless of focus,
+        enabling real-time robot control when keyboard control is enabled.
+        """
         # Bind on the toplevel so it catches regardless of focus, but we respect the checkbox
         self.bind_all("<KeyPress>", self._on_key_press, add=True)
         self.bind_all("<KeyRelease>", self._on_key_release, add=True)
     
     def _on_keyboard_control_changed(self) -> None:
-        """Called when the keyboard control checkbox state changes."""
+        """Handle keyboard control checkbox state changes.
+        When keyboard control is enabled, disables text entry to prevent conflicts
+        between typing and keyboard commands. When disabled, re-enables text entry.
+        """
         if self.keyboard_enabled_var.get():
             # Keyboard control enabled - disable text entry
             self.message_entry.config(state="disabled")
@@ -233,12 +262,18 @@ class Application(tk.Tk):
     # -----------------------------
     @staticmethod
     def _entry_focus_in(entry: tk.Entry, placeholder: str) -> None:
+        """Handle focus-in event for placeholder text fields.
+        Clears placeholder text and changes color to black when user clicks in the field.
+        """
         if entry.get() == placeholder and entry.cget('fg') == 'grey':
             entry.delete(0, tk.END)
             entry.config(fg='black')
 
     @staticmethod
     def _entry_focus_out(entry: tk.Entry, placeholder: str) -> None:
+        """Handle focus-out event for placeholder text fields.
+        Restores placeholder text in grey color if field is empty when user leaves it.
+        """
         if entry.get().strip() == "":
             entry.delete(0, tk.END)
             entry.insert(0, placeholder)
@@ -248,10 +283,18 @@ class Application(tk.Tk):
     # Device scanning/connection
     # -----------------------------
     def _start_scan_devices(self) -> None:
+        """Initiate BLE device scanning.
+        Disables the scan button and starts an async scan operation
+        to discover nearby BLE devices.
+        """
         self.scan_button.config(state="disabled", text="Scanning…")
         self.run_in_loop(self._scan_devices())
 
     async def _scan_devices(self) -> None:
+        """Perform async BLE device discovery.
+        Scans for BLE devices for 10 seconds, filters those with names,
+        and updates the device dropdown with discovered devices.
+        """
         timeout = 10.0
         try:
             self._append_text(f"Scanning for devices for {timeout} seconds...\n")
@@ -270,10 +313,18 @@ class Application(tk.Tk):
             self.after(0, lambda: self.scan_button.config(state="normal", text="Scan Devices"))
 
     def _update_device_dropdown(self, values: List[str]) -> None:
+        """Update the device dropdown with scan results.
+        Populates the dropdown menu with discovered device names and addresses,
+        and displays scan results count in the text area.
+        """
         self.device_dropdown['values'] = values
         self._append_text(f"Found {len(values)} device(s).\n" if values else "No devices found.\n")
 
     def _on_device_selected(self, _=None) -> None:
+        """Handle device selection from the dropdown.
+        When a device is selected from the dropdown, auto-fills the device name
+        entry field with the selected device's name for connection.
+        """
         sel = self.selected_device.get()
         if sel in self.discovered_devices:
             name = self.discovered_devices[sel]['name']
@@ -282,6 +333,10 @@ class Application(tk.Tk):
             self.device_name_entry.config(fg='black')
 
     def _start_connect_device(self) -> None:
+        """Initiate connection to a BLE device.
+        Determines device name and address from either dropdown selection or manual entry,
+        validates the input, and starts the async connection process.
+        """
         selected = self.selected_device.get()
         manual = self.device_name_entry.get().strip()
         dev_name: Optional[str] = None
@@ -298,6 +353,11 @@ class Application(tk.Tk):
         self.run_in_loop(self._async_connect(dev_name, dev_addr))
 
     async def _async_connect(self, device_name: str, address: Optional[str]) -> None:
+        """Perform async BLE connection to the specified device.
+        If no address is provided, performs a discovery scan to find the device by name.
+        Handles disconnection from any existing device, establishes new connection,
+        and starts notification listening if successful.
+        """
         try:
             if not address:
                 # try to discover by name
@@ -331,6 +391,10 @@ class Application(tk.Tk):
             self.connect_button.config(state="normal", text="Connect")
 
     async def _start_notifications(self) -> None:
+        """Start listening for BLE notifications from the connected device.
+        Sets up a notification handler that receives incoming data from the device
+        and displays it in the text area. Handles both UTF-8 text and raw bytes.
+        """
         async def handler(sender, data: bytes):
             try:
                 decoded = data.decode('utf-8', errors='ignore')
@@ -345,10 +409,17 @@ class Application(tk.Tk):
             self._append_text(f"Failed to start notifications: {e}\n")
 
     def _start_disconnect_device(self) -> None:
+        """Initiate disconnection from the current BLE device.
+        Disables the disconnect button and starts the async disconnection process.
+        """
         self.disconnect_button.config(state="disabled", text="Disconnecting…")
         self.run_in_loop(self._async_disconnect())
 
     async def _async_disconnect(self) -> None:
+        """Perform async disconnection from the BLE device.
+        Safely disconnects from the current device if connected,
+        updates status, and re-enables the disconnect button.
+        """
         try:
             if self.ble_client and self.ble_client.is_connected:
                 await self.ble_client.disconnect()
@@ -366,6 +437,10 @@ class Application(tk.Tk):
     # Manual message send
     # -----------------------------
     def _send_manual_message(self) -> None:
+        """Send a manually typed message to the connected device.
+        Validates connection and message content, applies line endings and header
+        if configured, then sends the message via BLE.
+        """
         if not (self.ble_client and self.ble_client.is_connected):
             self._append_text("Not connected to any device.\n")
             return
@@ -383,6 +458,14 @@ class Application(tk.Tk):
         self.message_entry.delete(0, tk.END)
 
     async def _async_write(self, payload: bytes, use_header: bool = None) -> None:
+        """Send data to the connected BLE device.
+        Optionally prepends a header to the payload based on configuration,
+        then writes the data to the BLE characteristic.
+        
+        Args:
+            payload: The data bytes to send
+            use_header: Override for header usage (None = use GUI setting)
+        """
         try:
             if self.ble_client:
                 # Use parameter if provided, otherwise use GUI checkbox
@@ -401,6 +484,10 @@ class Application(tk.Tk):
     # Actions loading (JSON)
     # -----------------------------
     def _reload_actions_from_disk(self) -> None:
+        """Load or reload actions configuration from actions.json file.
+        Reads the configuration file containing directions, actions, and header settings.
+        Creates a default configuration file if none exists.
+        """
         path = os.path.join(os.getcwd(), ACTIONS_FILE)
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -452,6 +539,10 @@ class Application(tk.Tk):
             messagebox.showerror("actions.json error", str(e))
 
     def _rebuild_actions_panel(self) -> None:
+        """Rebuild the action buttons panel from loaded configuration.
+        Destroys existing buttons and creates new ones in a grid layout
+        based on the current actions configuration.
+        """
         for w in self.actions_panel.winfo_children():
             w.destroy()
         if not self.config_actions:
@@ -474,6 +565,13 @@ class Application(tk.Tk):
             self.actions_panel.grid_columnconfigure(c, weight=1)
 
     def _trigger_action(self, act: Dict[str, Any]) -> None:
+        """Execute a configured action by sending its payload to the device.
+        Validates connection, converts action data to bytes, adds line endings,
+        and sends the command via BLE.
+        
+        Args:
+            act: Action dictionary containing key, data, and label
+        """
         if not (self.ble_client and self.ble_client.is_connected):
             self._append_text("Not connected to any device.\n")
             return
@@ -494,6 +592,15 @@ class Application(tk.Tk):
     # Keyboard handling for WASD + action keys
     # -----------------------------
     def _on_key_press(self, event: tk.Event) -> Optional[str]:
+        """Handle keyboard key press events for robot control.
+        Processes WASD keys for directional movement and configured action keys.
+        Only active when keyboard control is enabled. Prevents key repeat flooding.
+        
+        Args:
+            event: Tkinter key event
+        Returns:
+            "break" if key was handled, None to allow normal processing
+        """
         if not self.keyboard_enabled_var.get():
             return None  # allow normal typing
         key = (event.keysym or '').lower()
@@ -515,6 +622,15 @@ class Application(tk.Tk):
         return None
 
     def _on_key_release(self, event: tk.Event) -> Optional[str]:
+        """Handle keyboard key release events.
+        Stops directional movement when WASD keys are released by sending
+        a stop command and clearing the current direction state.
+        
+        Args:
+            event: Tkinter key event
+        Returns:
+            "break" if key was handled, None to allow normal processing
+        """
         key = (event.keysym or '').lower()
         if key in self._pressed_keys:
             self._pressed_keys.discard(key)
@@ -528,6 +644,13 @@ class Application(tk.Tk):
         return None
 
     def _start_direction_stream(self, key: str) -> None:
+        """Start streaming directional commands at the configured frequency.
+        Configures the direction payload and period, then begins continuous transmission
+        until the key is released. Sends the first command immediately.
+        
+        Args:
+            key: Direction key ('w', 'a', 's', 'd')
+        """
         # Only process if we're connected
         if not (self.ble_client and self.ble_client.is_connected):
             return
@@ -565,6 +688,10 @@ class Application(tk.Tk):
         self._append_text(f"Direction started: {key.upper()}\n")
 
     def _send_dir_stop(self) -> None:
+        """Send stop command to the connected device.
+        Sends the configured stop payload with line endings when a device is connected
+        and stop configuration is available.
+        """
         if not (self.ble_client and self.ble_client.is_connected):
             return
         if self.config_stop is None:
@@ -578,9 +705,14 @@ class Application(tk.Tk):
             self._append_text(f"Invalid stop payload: {e}\n")
             return
         self.run_in_loop(self._async_write(payload_with_endings))
-        self._append_text("Sent: DIR_STOP\n")
+        self._append_text(f"Sent: {self.config_stop}\n")
 
     def _direction_sender_loop(self) -> None:
+        """Background thread loop for continuous direction command streaming.
+        Runs until _dir_thread_stop is set, sending direction commands at the
+        configured frequency when a direction is active and device is connected.
+        Uses timing control to maintain consistent streaming frequency.
+        """
         last_sent = 0.0
         while not self._dir_thread_stop.is_set():
             now = time.time()
@@ -605,6 +737,13 @@ class Application(tk.Tk):
     # Persistence
     # -----------------------------
     def _save_last_connected_device(self, device_name: str) -> None:
+        """Save the device name to a file for future sessions.
+        Persists the last connected device name to automatically select
+        it on application restart.
+        
+        Args:
+            device_name: Name of the device to save
+        """
         try:
             with open(DEVICE_FILE, 'w', encoding='utf-8') as f:
                 json.dump({"device_name": device_name}, f)
@@ -612,6 +751,10 @@ class Application(tk.Tk):
             pass
 
     def _load_last_connected_device(self) -> None:
+        """Load the last connected device name from saved file.
+        Restores the device name from previous session and sets it
+        in the device name entry field.
+        """
         try:
             if not os.path.exists(DEVICE_FILE):
                 return
@@ -629,6 +772,13 @@ class Application(tk.Tk):
     # Text helper
     # -----------------------------
     def _append_text(self, text: str) -> None:
+        """Safely append text to the received data text widget.
+        Adds text to the end of the text widget and scrolls to show it,
+        with safety check for widget existence.
+        
+        Args:
+            text: Text string to append to the display
+        """
         if not self.winfo_exists():
             return
         self.received_data_text.insert(tk.END, text)
@@ -638,6 +788,11 @@ class Application(tk.Tk):
     # Closing
     # -----------------------------
     def on_closing(self) -> None:
+        """Clean up resources and close the application properly.
+        Stops the direction streaming thread, disconnects from BLE device,
+        shuts down the asyncio event loop, and destroys the GUI window.
+        Called when the user closes the application window.
+        """
         try:
             self._dir_thread_stop.set()
             if self.ble_client and self.ble_client.is_connected:
