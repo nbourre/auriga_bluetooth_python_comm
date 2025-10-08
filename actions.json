@@ -9,16 +9,32 @@
   "actions": [
     {
       "key": "q",
-      "data": "LIGHT_TOGGLE",
-      "label": "Toggle light"
+      "data": "l,0,0,25",
+      "label": "Blue Ring"
+    },
+    {
+      "key": "t",
+      "data": "l,0,0,0",
+      "label": "Turn Off Ring"
+    },
+    {
+      "key": "r",
+      "data": "b",
+      "label": "Beep Sound"
+    }
+    ,
+    {
+      "key": "p",
+      "data": "d",
+      "label": "Debug Toggle"
     },
     {
       "key": "e",
       "data": [
-        1,
-        255
+        65,
+        90
       ],
-      "label": "Special Command"
+      "label": "Some byte values"
     }
   ]
 }
