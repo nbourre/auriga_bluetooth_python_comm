@@ -36,7 +36,7 @@ void serialEvent() {
 
   if (!Serial.available()) return;
 
-  receivedData = Serial.readString();
+  receivedData = Serial.readStringUntil('\n');
   parseData(receivedData);
 }
 

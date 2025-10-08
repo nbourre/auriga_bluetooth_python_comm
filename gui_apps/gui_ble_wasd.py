@@ -480,10 +480,13 @@ class Application(tk.Tk):
         data = act.get("data")
         try:
             payload = to_bytes(data)
+            # Add line endings to the action payload
+            end = END_DATA_OPTIONS.get(self.line_endings_var.get(), b'')
+            payload_with_endings = payload + end
         except Exception as e:
             self._append_text(f"Invalid action payload: {e}\n")
             return
-        self.run_in_loop(self._async_write(payload))
+        self.run_in_loop(self._async_write(payload_with_endings))
         shown = act.get("label") or act.get("key", "?").upper()
         self._append_text(f"Action sent: {shown}\n")
 
@@ -520,10 +523,15 @@ class Application(tk.Tk):
                 self._send_dir_stop()
                 self._current_dir_key = None
                 self._dir_payload = None
+                self._append_text(f"Direction stopped: {key.upper()}\n")
             return "break" if self.keyboard_enabled_var.get() else None
         return None
 
     def _start_direction_stream(self, key: str) -> None:
+        # Only process if we're connected
+        if not (self.ble_client and self.ble_client.is_connected):
+            return
+            
         # Take a snapshot of current frequency; changes apply on next press
         try:
             hz = max(1.0, float(self.frequency_var.get()))
@@ -543,10 +551,18 @@ class Application(tk.Tk):
             self._append_text(f"Invalid direction payload for '{key}': {e}\n")
             return
 
+        # Add line endings to the payload
+        end = END_DATA_OPTIONS.get(self.line_endings_var.get(), b'')
+        payload_with_endings = payload + end
+
         # Switch current direction
         self._current_dir_key = key
-        self._dir_payload = payload
+        self._dir_payload = payload_with_endings
         self._dir_period_s = period
+        
+        # Send the first command immediately
+        self.run_in_loop(self._async_write(payload_with_endings))
+        self._append_text(f"Direction started: {key.upper()}\n")
 
     def _send_dir_stop(self) -> None:
         if not (self.ble_client and self.ble_client.is_connected):
@@ -555,10 +571,13 @@ class Application(tk.Tk):
             return
         try:
             payload = to_bytes(self.config_stop)
+            # Add line endings to the stop payload
+            end = END_DATA_OPTIONS.get(self.line_endings_var.get(), b'')
+            payload_with_endings = payload + end
         except Exception as e:
             self._append_text(f"Invalid stop payload: {e}\n")
             return
-        self.run_in_loop(self._async_write(payload))
+        self.run_in_loop(self._async_write(payload_with_endings))
         self._append_text("Sent: DIR_STOP\n")
 
     def _direction_sender_loop(self) -> None:
@@ -566,10 +585,20 @@ class Application(tk.Tk):
         while not self._dir_thread_stop.is_set():
             now = time.time()
             # If a direction is active and BLE is connected, send at the configured snapshot rate
-            if self._current_dir_key and self._dir_payload and self.ble_client and self.ble_client.is_connected:
+            if (self._current_dir_key and 
+                self._dir_payload and 
+                self.ble_client and 
+                self.ble_client.is_connected and
+                self._dir_period_s > 0):
+                
                 if now - last_sent >= self._dir_period_s:
-                    self.run_in_loop(self._async_write(self._dir_payload))
-                    last_sent = now
+                    # Send the direction command
+                    future = self.run_in_loop(self._async_write(self._dir_payload))
+                    if future:
+                        last_sent = now
+                        # Optional debug (remove comment to see frequency in action)
+                        # self.after(0, lambda: self._append_text(f"Sent: {self._current_dir_key.upper()} @ {1.0/self._dir_period_s:.1f}Hz\n"))
+            
             time.sleep(0.005)  # 5ms tick to keep CPU low
 
     # -----------------------------
