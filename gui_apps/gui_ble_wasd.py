@@ -90,7 +90,7 @@ class Application(tk.Tk):
         self._pressed_keys: set[str] = set()
 
         # Direction loop state
-        self._current_dir_key: Optional[str] = None   # one of 'w','a','s','d'
+        self._current_dir_key: Optional[str] = None   # one of 'w','a','s','d', 'e' (klaxon)
         self._dir_payload: Optional[bytes] = None
         self._dir_period_s: float = 1.0 / DEFAULT_FREQUENCY_HZ
         self._dir_thread_stop = threading.Event()
@@ -454,7 +454,7 @@ class Application(tk.Tk):
         self.run_in_loop(self._async_write(data))
         
         header_info = f" (with header {self.config_header})" if use_header else ""
-        self._append_text(f"Sent: {msg}{header_info}\n")
+        self._append_text(f"Sent to robot : {msg}{header_info}\n")
         self.message_entry.delete(0, tk.END)
 
     async def _async_write(self, payload: bytes, use_header: bool = None) -> None:
@@ -496,10 +496,10 @@ class Application(tk.Tk):
             # create a minimal template if missing
             cfg = {
                 "header": [255, 85],
-                "directions": {"w": "F", "a": "L", "s": "B", "d": "R", "stop": "DIR_STOP"},
+                "directions": {"w": "F", "a": "L", "s": "B", "d": "R", "e" : "K", "stop": "S"},
                 "actions": [
-                    {"key": "q", "data": "LIGHT_TOGGLE", "label": "Toggle Light"},
-                    {"key": "e", "data": [255, 85], "label": "Special Command"}
+                    {"key": "l", "data": "LIGHT_TOGGLE", "label": "Toggle Light"},
+                    {"key": "z", "data": [255, 85], "label": "Special Command"}
                 ]
             }
             with open(path, 'w', encoding='utf-8') as wf:
@@ -509,9 +509,9 @@ class Application(tk.Tk):
         try:
             dirs = cfg.get("directions", {})
             stop = dirs.get("stop")
-            if not all(k in dirs for k in ("w","a","s","d")) or stop is None:
-                raise ValueError("'directions' must define w,a,s,d and stop")
-            self.config_directions = {k: dirs[k] for k in ("w","a","s","d")}
+            if not all(k in dirs for k in ("w","a","s","d","e")) or stop is None:
+                raise ValueError("'directions' must define w,a,s,d,e (klaxon) and stop")
+            self.config_directions = {k: dirs[k] for k in ("w","a","s","d", "e")}
             self.config_stop = stop
 
             # Load header configuration
@@ -608,7 +608,7 @@ class Application(tk.Tk):
             return "break"  # suppress repeats if we handle it
 
         # Direction keys
-        if key in ('w','a','s','d'):
+        if key in ('w','a','s','d','e'):
             self._pressed_keys.add(key)
             self._start_direction_stream(key)
             return "break"
@@ -639,7 +639,7 @@ class Application(tk.Tk):
                 self._send_dir_stop()
                 self._current_dir_key = None
                 self._dir_payload = None
-                self._append_text(f"Direction stopped: {key.upper()}\n")
+                # self._append_text(f"Direction stopped: {key.upper()}\n")
             return "break" if self.keyboard_enabled_var.get() else None
         return None
 
@@ -649,7 +649,7 @@ class Application(tk.Tk):
         until the key is released. Sends the first command immediately.
         
         Args:
-            key: Direction key ('w', 'a', 's', 'd')
+            key: Direction key ('w', 'a', 's', 'd', 'e' (klaxon))
         """
         # Only process if we're connected
         if not (self.ble_client and self.ble_client.is_connected):
@@ -685,7 +685,7 @@ class Application(tk.Tk):
         
         # Send the first command immediately
         self.run_in_loop(self._async_write(payload_with_endings))
-        self._append_text(f"Direction started: {key.upper()}\n")
+        # self._append_text(f"Direction started: {key.upper()}\n")
 
     def _send_dir_stop(self) -> None:
         """Send stop command to the connected device.
