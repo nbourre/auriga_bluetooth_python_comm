@@ -148,19 +148,18 @@ void stateManager(unsigned long ct) {
 
 void ledAction(int r, int g, int b) {
   led_ring.setColor(r, g, b);
-  led_ring.show();   
+  led_ring.show();
 }
 
-void ledAction(int idx, int  r, int g, int b) {
+void ledAction(int idx, int r, int g, int b) {
   // Mettre à jour la couleur de toutes les LEDs de l'anneau
   if (idx == 0) {
-    led_ring.setColor(r, g, b);  
+    led_ring.setColor(r, g, b);
+  } else {
+    led_ring.setColorAt(idx, r, g, b);
   }
-  else {
-    led_ring.setColorAt(idx, r, g, b);  
-  }
-  
-  led_ring.show(); 
+
+  led_ring.show();
 }
 
 void commandBeep() {
@@ -169,7 +168,7 @@ void commandBeep() {
 
 void commandLight(String params) {
   int commaCount = countCharOccurrences(params, ',');
-  
+
   // Vérifie le nombre de paramètres en comptant les virgules
   if (commaCount == 2) {
     // Trois paramètres (r, g, b) pour définir toute la couleur de l'anneau
@@ -177,10 +176,9 @@ void commandLight(String params) {
     params = params.substring(params.indexOf(',') + 1);
     int g = params.substring(0, params.indexOf(',')).toInt();
     int b = params.substring(params.indexOf(',') + 1).toInt();
-    
+
     ledAction(r, g, b);  // Appel pour affecter l'ensemble de l'anneau
-  } 
-  else if (commaCount == 3) {
+  } else if (commaCount == 3) {
     // Quatre paramètres (idx, r, g, b) pour définir une LED spécifique
     int idx = params.substring(0, params.indexOf(',')).toInt();
     params = params.substring(params.indexOf(',') + 1);
@@ -188,25 +186,24 @@ void commandLight(String params) {
     params = params.substring(params.indexOf(',') + 1);
     int g = params.substring(0, params.indexOf(',')).toInt();
     int b = params.substring(params.indexOf(',') + 1).toInt();
-    
+
     ledAction(idx, r, g, b);  // Appel pour affecter une LED spécifique
-  } 
-  else {
+  } else {
     Serial.println(F("Commande lumière invalide"));
   }
 }
 
 void commandForward(String params) {
-    // paramètre
-    Serial.print(F("Paramètre : "));
-    Serial.println(params);
-    // Ajouter le code pour traiter la commande FORWARD avec ses paramètres
+  // paramètre
+  Serial.print(F("Paramètre : "));
+  Serial.println(params);
+  // Ajouter le code pour traiter la commande FORWARD avec ses paramètres
 }
 
 #pragma endregion
 
 #pragma region HELPERS
-int countCharOccurrences(const String &str, char ch) {
+int countCharOccurrences(const String& str, char ch) {
   int count = 0;
   for (int i = 0; i < str.length(); i++) {
     if (str[i] == ch) {
