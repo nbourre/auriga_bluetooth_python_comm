@@ -1,0 +1,40 @@
+{
+  "header": [
+    255,
+    85
+  ],
+  "directions": {
+    "w": "F",
+    "a": "L",
+    "s": "B",
+    "d": "R",
+    "e": "K",
+    "stop": "S"
+  },
+  "actions": [
+    {
+      "key": "j",
+      "data": "SUIVRE_LIGNE",
+      "label": "Suivre Ligne"
+    },
+    {
+      "key": "z",
+      "data": [
+        255,
+        85
+      ],
+      "label": "Special Command"
+    },
+    { "key": "c", "data": "CALIBRER", "label": "Calibrer" },
+    { "key": "t", "data": "DEMI_TOUR", "label": "Demi-tour" },
+    { "key": "n", "data": "NEUTRE", "label": "Neutre" },
+    { "key": "g", "data": "DEBOGUER", "label": "Déboguer (toggle)" },
+    { "key": "m", "data": "MANUEL", "label": "Mode manuel" },
+    { "key": "i", "data": "AVANCER", "label": "Avancer" },
+    { "key": "h", "data": "TOURNER_GAUCHE", "label": "Tourner gauche" },
+    { "key": "k", "data": "RECULER", "label": "Reculer" },
+    { "key": "l", "data": "TOURNER_DROITE", "label": "Tourner droite" },
+    { "key": "o", "data": "ARRETER", "label": "Arrêter" },
+    { "key": "b", "data": "KLAXONNER", "label": "Klaxonner" }
+  ]
+}

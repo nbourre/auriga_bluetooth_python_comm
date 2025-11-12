@@ -6,3 +6,4 @@ pyobjc-framework-Cocoa==9.2
 pyobjc-framework-CoreBluetooth==9.2
 pyobjc-framework-libdispatch==9.2
 typing-extensions==4.7.1
+pygame>=2.6.1
