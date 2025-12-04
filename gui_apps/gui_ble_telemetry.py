@@ -32,6 +32,29 @@ DEFAULT_FREQUENCY_HZ = 10.0
 DEFAULT_HEADER = [0xFF, 0x55]
 TOTAL_CHECKPOINTS = 6
 
+# UI Layout constants
+UI_MARGIN_LEFT = 16
+UI_MARGIN_TOP = 10
+UI_SPACING_SMALL = 2
+UI_SPACING_MEDIUM = 6
+UI_SPACING_LARGE = 15
+UI_SPACING_HBOX = 20
+UI_TITLE_FONT_SIZE = 32
+UI_FONT_SIZE = 22
+UI_FONT_SMALL_SIZE = 18
+UI_SECTION_SPACING = 15
+UI_DEVICE_MAX = 10
+UI_ACTION_MAX = 10
+UI_LOG_HEIGHT = 150
+UI_LOG_BOTTOM_OFFSET = 70
+UI_LOG_INPUT_HEIGHT = 60
+UI_COL_1_MIN_WIDTH = 500  # Whole telemetry column minimum width
+UI_COLUMN_2_OFFSET = 350  # For telemetry right column
+UI_DEVICES_PANEL_OFFSET = 600  # For devices panel offset from left
+UI_ACTIONS_PANEL_OFFSET = 600  # For actions panel offset from left
+
+UI_DEVICE_MIN_HEIGHT = UI_DEVICE_MAX * (UI_FONT_SMALL_SIZE)
+
 # Checkpoint tracking
 class TelemetryState:
     """Store telemetry data received from robot as JSON."""
@@ -44,6 +67,7 @@ class TelemetryState:
         self.pwm_r: int = 0
         self.capt: List[int] = [0, 0, 0, 0, 0]
         self.completed_checkpoints: set[int] = set()  # checkpoint numbers 1-6
+        self.last_checkpoint: int = 0  # Most recently completed checkpoint
 
     def update_from_json(self, data: Dict[str, Any]) -> None:
         """Update telemetry from JSON dict."""
@@ -58,6 +82,7 @@ class TelemetryState:
         cp = data.get("cp")
         if cp is not None and 1 <= cp <= TOTAL_CHECKPOINTS:
             self.completed_checkpoints.add(cp)
+            self.last_checkpoint = cp
 
 # -----------------------------
 # Helpers
@@ -143,23 +168,62 @@ class TextLog:
             surface.blit(img, (x, yy))
             yy += img.get_height() + 2
 
-# -------- Layout Containers (HBox / VBox) --------
-class HBox:
-    """Horizontal layout container for Pygame elements."""
-    def __init__(self, x: int = 0, y: int = 0, spacing: int = 10):
+# -------- Layout Containers (Base Container, HBox, VBox) --------
+class Container:
+    """Base class for layout containers."""
+    def __init__(self, x: int = 0, y: int = 0, spacing: int = 10, 
+                 min_width: Optional[int] = None, max_width: Optional[int] = None,
+                 min_height: Optional[int] = None, max_height: Optional[int] = None):
         self.x = x
         self.y = y
         self.spacing = spacing
         self.children: List[Tuple[Any, int, int]] = []  # (element, width, height)
         self._cached_width = 0
         self._cached_height = 0
+        self.min_width = min_width
+        self.max_width = max_width
+        self.min_height = min_height
+        self.max_height = max_height
     
     def add(self, element: Any, width: Optional[int] = None, height: Optional[int] = None) -> None:
-        """Add an element. If width/height not specified, auto-calculate from rendering."""
+        """Add an element to the container."""
         w = width or 0
         h = height or 0
         self.children.append((element, w, h))
         self._recalculate()
+    
+    def _recalculate(self) -> None:
+        """Calculate dimensions. Override in subclasses."""
+        pass
+    
+    def _apply_constraints(self) -> None:
+        """Apply min/max width and height constraints."""
+        if self.min_width is not None:
+            self._cached_width = max(self._cached_width, self.min_width)
+        if self.max_width is not None:
+            self._cached_width = min(self._cached_width, self.max_width)
+        if self.min_height is not None:
+            self._cached_height = max(self._cached_height, self.min_height)
+        if self.max_height is not None:
+            self._cached_height = min(self._cached_height, self.max_height)
+    
+    def get_width(self) -> int:
+        return self._cached_width
+    
+    def get_height(self) -> int:
+        return self._cached_height
+    
+    def draw(self, surface: pygame.Surface, font: Optional[pygame.font.Font] = None, color=(230, 230, 230)) -> None:
+        """Draw the container. Override in subclasses."""
+        pass
+
+class HBox(Container):
+    """Horizontal layout container for Pygame elements."""
+    def __init__(self, x: int = 0, y: int = 0, spacing: int = 10,
+                 min_width: Optional[int] = None, max_width: Optional[int] = None,
+                 min_height: Optional[int] = None, max_height: Optional[int] = None):
+        super().__init__(x, y, spacing, min_width=min_width, max_width=max_width,
+                        min_height=min_height, max_height=max_height)
     
     def _recalculate(self) -> None:
         """Calculate total width and height of all children."""
@@ -167,6 +231,9 @@ class HBox:
         max_h = 0
         for elem, w, h in self.children:
             if w == 0 or h == 0:
+                # Ensure child containers recalculate themselves first
+                if hasattr(elem, '_recalculate'):
+                    elem._recalculate()
                 # Try to get size from element (if it has get_width/get_height)
                 if hasattr(elem, 'get_width') and hasattr(elem, 'get_height'):
                     w = elem.get_width()
@@ -177,17 +244,29 @@ class HBox:
             max_h = max(max_h, h)
         self._cached_width = max(0, total_w - self.spacing)
         self._cached_height = max_h
-    
-    def get_width(self) -> int:
-        return self._cached_width
-    
-    def get_height(self) -> int:
-        return self._cached_height
+        self._apply_constraints()
     
     def draw(self, surface: pygame.Surface, font: Optional[pygame.font.Font] = None, color=(230, 230, 230)) -> None:
-        """Draw all children horizontally."""
+        """Draw all children horizontally, distributing space equally if needed."""
+        # Calculate available width for children with unspecified widths
+        unspecified_indices = [i for i, (elem, w, h) in enumerate(self.children) if w == 0]
+        specified_width = sum(w for elem, w, h in self.children if w > 0)
+        spacing_total = self.spacing * (len(self.children) - 1) if len(self.children) > 0 else 0
+        
+        if unspecified_indices:
+            # Calculate equal width for unspecified children
+            # Estimate available width (use container width if set via constraints)
+            available_width = self.get_width() if self.get_width() > 0 else 500  # fallback
+            remaining_width = available_width - specified_width - spacing_total
+            equal_width = max(50, remaining_width // len(unspecified_indices)) if unspecified_indices else 0
+        else:
+            equal_width = 0
+        
         curr_x = self.x
-        for elem, w, h in self.children:
+        for i, (elem, w, h) in enumerate(self.children):
+            # Use equal_width if w == 0
+            use_w = equal_width if w == 0 else w
+            
             if isinstance(elem, str):
                 # Render string
                 if font:
@@ -198,33 +277,29 @@ class HBox:
                 # Nested layout container - update position and draw
                 elem.x = curr_x
                 elem.y = self.y
+                # Apply width if unspecified
+                if w == 0 and use_w > 0:
+                    elem.min_width = use_w
+                    elem.max_width = use_w
+                    elem._recalculate()
                 elem.draw(surface, font=font, color=color)
                 curr_x += elem.get_width() + self.spacing
             elif hasattr(elem, 'draw'):
                 # Element has a draw method
                 elem.draw(surface)
-                curr_x += w + self.spacing
+                curr_x += use_w + self.spacing
             elif isinstance(elem, pygame.Surface):
                 # Direct surface
                 surface.blit(elem, (curr_x, self.y))
-                curr_x += w + self.spacing
+                curr_x += use_w + self.spacing
 
-class VBox:
+class VBox(Container):
     """Vertical layout container for Pygame elements."""
-    def __init__(self, x: int = 0, y: int = 0, spacing: int = 6):
-        self.x = x
-        self.y = y
-        self.spacing = spacing
-        self.children: List[Tuple[Any, int, int]] = []  # (element, width, height)
-        self._cached_width = 0
-        self._cached_height = 0
-    
-    def add(self, element: Any, width: Optional[int] = None, height: Optional[int] = None) -> None:
-        """Add an element. If width/height not specified, auto-calculate from rendering."""
-        w = width or 0
-        h = height or 0
-        self.children.append((element, w, h))
-        self._recalculate()
+    def __init__(self, x: int = 0, y: int = 0, spacing: int = 6,
+                 min_width: Optional[int] = None, max_width: Optional[int] = None,
+                 min_height: Optional[int] = None, max_height: Optional[int] = None):
+        super().__init__(x, y, spacing, min_width=min_width, max_width=max_width,
+                        min_height=min_height, max_height=max_height)
     
     def _recalculate(self) -> None:
         """Calculate total width and height of all children."""
@@ -232,6 +307,9 @@ class VBox:
         total_h = 0
         for elem, w, h in self.children:
             if w == 0 or h == 0:
+                # Ensure child containers recalculate themselves first
+                if hasattr(elem, '_recalculate'):
+                    elem._recalculate()
                 # Try to get size from element
                 if hasattr(elem, 'get_width') and hasattr(elem, 'get_height'):
                     w = elem.get_width()
@@ -242,17 +320,29 @@ class VBox:
             total_h += h + self.spacing
         self._cached_width = max_w
         self._cached_height = max(0, total_h - self.spacing)
-    
-    def get_width(self) -> int:
-        return self._cached_width
-    
-    def get_height(self) -> int:
-        return self._cached_height
+        self._apply_constraints()
     
     def draw(self, surface: pygame.Surface, font: Optional[pygame.font.Font] = None, color=(230, 230, 230)) -> None:
-        """Draw all children vertically."""
+        """Draw all children vertically, distributing space equally if needed."""
+        # Calculate available height for children with unspecified heights
+        unspecified_indices = [i for i, (elem, w, h) in enumerate(self.children) if h == 0]
+        specified_height = sum(h for elem, w, h in self.children if h > 0)
+        spacing_total = self.spacing * (len(self.children) - 1) if len(self.children) > 0 else 0
+        
+        if unspecified_indices:
+            # Calculate equal height for unspecified children
+            # Estimate available height (use container height if set via constraints)
+            available_height = self.get_height() if self.get_height() > 0 else 400  # fallback
+            remaining_height = available_height - specified_height - spacing_total
+            equal_height = max(50, remaining_height // len(unspecified_indices)) if unspecified_indices else 0
+        else:
+            equal_height = 0
+        
         curr_y = self.y
-        for elem, w, h in self.children:
+        for i, (elem, w, h) in enumerate(self.children):
+            # Use equal_height if h == 0
+            use_h = equal_height if h == 0 else h
+            
             if isinstance(elem, str):
                 # Render string
                 if font:
@@ -263,28 +353,52 @@ class VBox:
                 # Nested layout container - update position and draw
                 elem.x = self.x
                 elem.y = curr_y
+                # Apply height if unspecified
+                if h == 0 and use_h > 0:
+                    elem.min_height = use_h
+                    elem.max_height = use_h
+                    elem._recalculate()
                 elem.draw(surface, font=font, color=color)
                 curr_y += elem.get_height() + self.spacing
             elif hasattr(elem, 'draw'):
                 # Element has a draw method
-                if hasattr(elem, 'x'):
-                    elem.x = self.x
-                if hasattr(elem, 'y'):
-                    elem.y = curr_y
+                # Use set_position if available (for MessageBox, etc.)
+                if hasattr(elem, 'set_position'):
+                    elem.set_position(self.x, curr_y)
+                else:
+                    if hasattr(elem, 'x'):
+                        elem.x = self.x
+                    if hasattr(elem, 'y'):
+                        elem.y = curr_y
                 elem.draw(surface)
-                curr_y += h + self.spacing
+                curr_y += use_h + self.spacing
             elif isinstance(elem, pygame.Surface):
                 surface.blit(elem, (self.x, curr_y))
-                curr_y += h + self.spacing
+                curr_y += use_h + self.spacing
 
 class VBoxWithTitle(VBox):
     """VBox with a title header."""
-    def __init__(self, title: str, x: int = 0, y: int = 0, spacing: int = 6, title_font: Optional[pygame.font.Font] = None, title_color=(235, 235, 235)):
-        super().__init__(x, y, spacing)
+    def __init__(self, title: str, x: int = 0, y: int = 0, spacing: int = 6, 
+                 title_font: Optional[pygame.font.Font] = None, title_color=(235, 235, 235),
+                 min_width: Optional[int] = None, max_width: Optional[int] = None,
+                 min_height: Optional[int] = None, max_height: Optional[int] = None):
+        super().__init__(x, y, spacing, min_width=min_width, max_width=max_width, 
+                        min_height=min_height, max_height=max_height)
         self.title = title
         self.title_font = title_font
         self.title_color = title_color
         self._title_height = 0
+    
+    def _recalculate(self) -> None:
+        """Calculate width and height including title."""
+        # Call parent recalculate
+        super()._recalculate()
+        
+        # Add title height to total height
+        if self.title_font and self.title:
+            title_img = self.title_font.render(self.title, True, self.title_color)
+            self._title_height = title_img.get_height()
+            self._cached_height += self._title_height + 6  # 6 pixels spacing after title
     
     def draw(self, surface: pygame.Surface, font: Optional[pygame.font.Font] = None, color=(230, 230, 230)) -> None:
         """Draw title and all children vertically."""
@@ -313,10 +427,14 @@ class VBoxWithTitle(VBox):
                 curr_y += elem.get_height() + self.spacing
             elif hasattr(elem, 'draw'):
                 # Element has a draw method
-                if hasattr(elem, 'x'):
-                    elem.x = self.x
-                if hasattr(elem, 'y'):
-                    elem.y = curr_y
+                # Use set_position if available (for MessageBox, etc.)
+                if hasattr(elem, 'set_position'):
+                    elem.set_position(self.x, curr_y)
+                else:
+                    if hasattr(elem, 'x'):
+                        elem.x = self.x
+                    if hasattr(elem, 'y'):
+                        elem.y = curr_y
                 elem.draw(surface)
                 curr_y += h + self.spacing
             elif isinstance(elem, pygame.Surface):
@@ -348,21 +466,28 @@ class CheckpointTimeline:
         line_y = self.y + 20
 
         # Draw horizontal line
-        pygame.draw.line(surface, (100, 100, 100), 
-                        (self.x + cp_spacing, line_y), 
-                        (self.x + cp_spacing * TOTAL_CHECKPOINTS, line_y), 2)
+        # pygame.draw.line(surface, (100, 100, 100), 
+        #                 (self.x + cp_spacing, line_y), 
+        #                 (self.x + cp_spacing * TOTAL_CHECKPOINTS, line_y), 2)
 
         # Draw checkpoint circles
         for cp_num in range(1, TOTAL_CHECKPOINTS + 1):
             cp_x = self.x + cp_spacing * cp_num
-            is_completed = cp_num in self.telemetry.completed_checkpoints
-            
+#            is_completed = cp_num in self.telemetry.completed_checkpoints
+            is_completed = cp_num <= self.telemetry.last_checkpoint
+
             if is_completed:
                 # Filled circle for completed
                 pygame.draw.circle(surface, (0, 200, 100), (cp_x, line_y), cp_radius)
             else:
                 # Empty circle for not completed
                 pygame.draw.circle(surface, (100, 100, 100), (cp_x, line_y), cp_radius, 2)
+            
+            # Draw the lines between the circles
+            if cp_num > 1:
+                pygame.draw.line(surface, (100, 100, 100),
+                                (self.x + cp_spacing * (cp_num - 1) + cp_radius, line_y),
+                                (self.x + cp_spacing * cp_num - cp_radius, line_y), 2)
             
             # Draw checkpoint number
             if self.font_small:
@@ -704,13 +829,13 @@ class App:
         self.WIDTH = self.screen.get_width()
         self.HEIGHT = self.screen.get_height()
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont(None, 22)
-        self.font_small = pygame.font.SysFont(None, 18)
+        self.font = pygame.font.SysFont(None, UI_FONT_SIZE)
+        self.font_small = pygame.font.SysFont(None, UI_FONT_SMALL_SIZE)
+        self.font_title = pygame.font.SysFont(None, UI_TITLE_FONT_SIZE)
 
         # Create MessageBox for log display (position will be set in draw)
-        log_height = 150
-        log_y = self.HEIGHT - log_height - 70
-        self.message_box = MessageBox(16, log_y, self.WIDTH - 32, log_height, font=self.font_small)
+        log_y = self.HEIGHT - UI_LOG_HEIGHT - UI_LOG_BOTTOM_OFFSET
+        self.message_box = MessageBox(UI_MARGIN_LEFT, log_y, self.WIDTH - 32, UI_LOG_HEIGHT, font=self.font_small)
         
         self.telemetry = TelemetryState()
         self.ble = BleController(self.message_box, self.telemetry)
@@ -733,84 +858,87 @@ class App:
 
     # ----------- rendering -----------
     def draw_header(self) -> None:
-        y = 10
+        y = UI_MARGIN_TOP
         
         # Title
-        title_font = pygame.font.SysFont(None, 32)
-        img = title_font.render("Robot Telemetry Monitor", True, self.ACCENT)
-        self.screen.blit(img, (16, y))
-        y += img.get_height() + 10
+        img = self.font_title.render("Robot Telemetry Monitor", True, self.ACCENT)
+        self.screen.blit(img, (UI_MARGIN_LEFT, y))
+        y += img.get_height() + UI_SECTION_SPACING
         
         # Connection status
         status = "CONNECTED" if (self.ble.client and self.ble.client.is_connected) else "DISCONNECTED"
         status_color = (0, 200, 100) if (self.ble.client and self.ble.client.is_connected) else (255, 80, 80)
         img = self.font.render(f"Status: {status}", True, status_color)
-        self.screen.blit(img, (16, y))
-        y += img.get_height() + 15
+        self.screen.blit(img, (UI_MARGIN_LEFT, y))
+        y += img.get_height() + UI_SECTION_SPACING
         
         # Controls info (more compact)
         img = self.font_small.render("Controls: C=Scan | ENTER=Connect | UP/DOWN=Select | H=Header | F=Line End | +/-=Freq | T=Type | ESC=Quit", True, (150, 150, 150))
-        self.screen.blit(img, (16, y))
-        y += img.get_height() + 15
+        self.screen.blit(img, (UI_MARGIN_LEFT, y))
+        y += img.get_height() + UI_SECTION_SPACING
         
         # Master VBox layout
-        master_vbox = VBox(x=16, y=y, spacing=15)
+        master_vbox = VBox(x=UI_MARGIN_LEFT, y=y, spacing=UI_SPACING_LARGE)
         
         # First HBox: Checkpoints and Available Devices
-        first_hbox = HBox(x=16, y=y, spacing=20)
+        first_hbox = HBox(spacing=UI_SPACING_HBOX)
         
         # Checkpoints section
-        timeline_control = CheckpointTimeline(self.telemetry, x=16, y=y + 25, font_small=self.font_small, fg_color=self.FG)
-        checkpoint_box = VBoxWithTitle("Checkpoints:", x=16, y=y, title_font=self.font, title_color=self.FG, spacing=6)
+        timeline_control = CheckpointTimeline(self.telemetry, x=0, y=0, font_small=self.font_small, fg_color=self.FG)
+        checkpoint_box = VBoxWithTitle("Checkpoints:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_MEDIUM, min_width=UI_COL_1_MIN_WIDTH)
         checkpoint_box.add(timeline_control, width=timeline_control.get_width(), height=timeline_control.get_height())
         
         # Available Devices section
-        devices_box = VBoxWithTitle("Available Devices:", x=16 + 600, y=y, title_font=self.font, title_color=self.FG, spacing=2)
+        devices_box = VBoxWithTitle("Available Devices:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_SMALL, min_width=UI_COL_1_MIN_WIDTH, min_height=UI_DEVICE_MIN_HEIGHT)
         if self.ble.discovered:
-            for i, (nm, addr) in enumerate(self.ble.discovered[:10]):
+            for i, (nm, addr) in enumerate(self.ble.discovered[:UI_DEVICE_MAX]):
                 sel = (i == self.ble.selected_index)
                 color = self.ACCENT if sel else (200, 200, 200)
                 text = f"{'► ' if sel else '  '} {nm}"
                 devices_box.add(text)
         else:
-            img = self.font_small.render("No devices (press C to scan)", True, (150, 150, 150))
-            self.screen.blit(img, (16, y + 25))
+            # Add empty message as a child element so min_height constraint applies
+            devices_box.add("No devices (press C to scan)")
         
         first_hbox.add(checkpoint_box)
         first_hbox.add(devices_box)
         master_vbox.add(first_hbox)
         
         # Second HBox: Telemetry and Actions
-        second_hbox = HBox(x=16, spacing=20)
+        second_hbox = HBox(spacing=UI_SPACING_HBOX)
         
         # Telemetry section
-        col1_vbox = VBox(x=16 + 10, spacing=4)
+        col1_vbox = VBox(spacing=UI_SPACING_MEDIUM, min_width=200)
         col1_items = [
             f"State: {self.telemetry.etat}",
             f"Timestamp: {self.telemetry.ts} ms",
             f"Chrono: {self.telemetry.chrono} ms",
-            f"Gyro Z: {self.telemetry.gz:.2f}°/s",
+            f"Angle Z: {self.telemetry.gz:.2f}°"
         ]
         for item in col1_items:
             col1_vbox.add(item)
         
-        col2_vbox = VBox(x=16 + 300, spacing=4)
-        pwm_text = f"PWM L: {self.telemetry.pwm_l}  R: {self.telemetry.pwm_r}"
-        sensor_text = f"Sensors: {self.telemetry.capt}"
-        col2_vbox.add(pwm_text)
-        col2_vbox.add(sensor_text)
+        col2_vbox = VBox(spacing=UI_SPACING_MEDIUM, min_width=200)
+        col2_items = [
+            f"PWM L: {self.telemetry.pwm_l}  R: {self.telemetry.pwm_r}",
+            f"Sensors: {self.telemetry.capt}",
+            f"Checkpoint: {self.telemetry.last_checkpoint}/{TOTAL_CHECKPOINTS}",
+        ]
+        for item in col2_items:
+            col2_vbox.add(item)
         
-        columns_hbox = HBox(x=16, spacing=20)
+        columns_hbox = HBox(spacing=UI_SPACING_HBOX)
         columns_hbox.add(col1_vbox)
         columns_hbox.add(col2_vbox)
         
-        telemetry_box = VBoxWithTitle("Telemetry:", x=16, title_font=self.font, title_color=self.FG, spacing=6)
-        telemetry_box.add(columns_hbox)
+        telemetry_box = VBoxWithTitle("Telemetry:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_MEDIUM, min_width=UI_COL_1_MIN_WIDTH)
+        # Add columns_hbox with width to make it expand and fill available space
+        telemetry_box.add(columns_hbox, width=UI_COL_1_MIN_WIDTH)
         
         # Actions section
-        actions_box = VBoxWithTitle("Actions:", x=16 + 600, title_font=self.font, title_color=self.FG, spacing=2)
+        actions_box = VBoxWithTitle("Actions:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_SMALL, min_width=UI_COL_1_MIN_WIDTH)
         if self.ble.config_actions:
-            for act in self.ble.config_actions[:10]:
+            for act in self.ble.config_actions[:UI_ACTION_MAX]:
                 label = f"{act.get('label') or act.get('key','?').upper()} ({act.get('key','?').upper()})"
                 actions_box.add(label)
         
@@ -818,23 +946,20 @@ class App:
         second_hbox.add(actions_box)
         master_vbox.add(second_hbox)
         
+        # Message box section - add to master VBox
+        self.message_box.set_size(self.WIDTH - 32, UI_LOG_HEIGHT)
+        master_vbox.add(self.message_box, width=self.WIDTH - 32, height=UI_LOG_HEIGHT)
+        
         # Draw the master VBox
         master_vbox.draw(self.screen, font=self.font_small, color=self.FG)
         
-        # Message box - anchored to bottom
-        log_height = 150
-        log_y = self.HEIGHT - log_height - 70  # 70 for text input overlay space
-        self.message_box.set_position(16, log_y)
-        self.message_box.set_size(self.WIDTH - 32, log_height)
-        self.message_box.draw(self.screen)
-        
         # text input overlay
         if self.text_input_mode:
-            input_y = self.HEIGHT - 60
-            pygame.draw.rect(self.screen, (50,120,200), pygame.Rect(0, input_y, self.WIDTH, 60))
+            input_y = self.HEIGHT - UI_LOG_INPUT_HEIGHT
+            pygame.draw.rect(self.screen, (50,120,200), pygame.Rect(0, input_y, self.WIDTH, UI_LOG_INPUT_HEIGHT))
             prompt_text = f"Type message (ESC to cancel, ENTER to send): {self.text_input_buffer}_"
             img = self.font.render(prompt_text, True, (255,255,255))
-            self.screen.blit(img, (16, input_y + 20))
+            self.screen.blit(img, (UI_MARGIN_LEFT, input_y + 20))
 
     def _draw_telemetry_data(self, x: int, y: int) -> int:
         """Draw telemetry data section using VBoxWithTitle containing HBox. Returns new y position."""
