@@ -100,6 +100,9 @@ class BleController:
         self._dir_thread_stop = threading.Event()
         self._dir_thread = threading.Thread(target=self._direction_sender_loop, daemon=True)
 
+        # Message buffering for notifications
+        self._rx_buffer = ""
+
         # start event loop thread
         self._start_loop_thread()
         self._dir_thread.start()
@@ -228,9 +231,14 @@ class BleController:
         async def handler(sender, data: bytes):
             try:
                 decoded = data.decode('utf-8', errors='ignore')
-            except Exception:
-                decoded = str(data)
-            self.log.add(f"Received: {decoded}\n")
+                self._rx_buffer += decoded
+                # Process complete messages (delimited by newline)
+                while '\n' in self._rx_buffer:
+                    message, self._rx_buffer = self._rx_buffer.split('\n', 1)
+                    if message.strip():  # Only log non-empty lines
+                        self.log.add(f"Received: {message.strip()}\n")
+            except Exception as e:
+                self.log.add(f"Handler error: {e}\n")
         try:
             if self.client:
                 await self.client.start_notify(CHARACTERISTIC_NOTIFY_UUID, handler)
