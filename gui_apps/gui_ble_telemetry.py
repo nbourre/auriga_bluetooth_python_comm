@@ -825,7 +825,7 @@ class App:
     def __init__(self) -> None:
         pygame.init()
         pygame.display.set_caption("BLE Robot Telemetry Monitor")
-        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        self.screen = pygame.display.set_mode((1200, 800), pygame.RESIZABLE)
         self.WIDTH = self.screen.get_width()
         self.HEIGHT = self.screen.get_height()
         self.clock = pygame.time.Clock()
