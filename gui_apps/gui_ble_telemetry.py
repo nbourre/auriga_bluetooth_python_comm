@@ -287,6 +287,14 @@ class HBox(Container):
                 curr_x += elem.get_width() + self.spacing
             elif hasattr(elem, 'draw'):
                 # Element has a draw method
+                # Set position if available
+                if hasattr(elem, 'set_position'):
+                    elem.set_position(curr_x, self.y)
+                else:
+                    if hasattr(elem, 'x'):
+                        elem.x = curr_x
+                    if hasattr(elem, 'y'):
+                        elem.y = self.y
                 elem.draw(surface)
                 curr_x += use_w + self.spacing
             elif isinstance(elem, pygame.Surface):
@@ -363,7 +371,7 @@ class VBox(Container):
                 curr_y += elem.get_height() + self.spacing
             elif hasattr(elem, 'draw'):
                 # Element has a draw method
-                # Use set_position if available (for MessageBox, etc.)
+                # Set position if available
                 if hasattr(elem, 'set_position'):
                     elem.set_position(self.x, curr_y)
                 else:
@@ -523,24 +531,24 @@ class Dial:
         # Draw dial circle (background)
         pygame.draw.circle(surface, (60, 60, 60), (center_x, center_y), self.radius, 3)
         
-        # Draw cardinal directions (N, E, S, W)
-        directions = [
-            (0, "N"),      # North (top)
-            (90, "E"),     # East (right)
-            (180, "S"),    # South (bottom)
-            (270, "W")     # West (left)
-        ]
+        # Draw angle labels at 45° increments (-180 to 180)
+        # Note: 0° is up/north, angles increase clockwise (like compass heading)
+        angles = [-180, -135, -90, -45, 0, 45, 90, 135, 180]
         
-        for angle, label in directions:
+        for angle in angles:
             # Convert angle to radians (0° is up/north)
             rad = math.radians(angle)
             # Position text outside the circle
             text_dist = self.radius + 15
-            text_x = center_x + math.sin(rad) * text_dist - 8
-            text_y = center_y - math.cos(rad) * text_dist - 8
+            text_x = center_x + math.sin(rad) * text_dist
+            text_y = center_y - math.cos(rad) * text_dist
             
             if self.font_small:
-                label_img = self.font_small.render(label, True, (150, 150, 150))
+                label_text = f"{angle}°" if (angle != 180 and angle != -180) else "±180°"
+                label_img = self.font_small.render(label_text, True, (150, 150, 150))
+                # Center the text on the position
+                text_x -= label_img.get_width() // 2
+                text_y -= label_img.get_height() // 2
                 surface.blit(label_img, (text_x, text_y))
         
         # Draw heading needle
@@ -566,7 +574,7 @@ class Dial:
             heading_text = f"Heading: {heading:.1f}°"
             heading_img = self.font_small.render(heading_text, True, self.fg_color)
             heading_x = center_x - heading_img.get_width() // 2
-            heading_y = center_y + self.radius + 8
+            heading_y = center_y + self.radius + 20
             surface.blit(heading_img, (heading_x, heading_y))
 
 
@@ -972,9 +980,12 @@ class App:
         else:
             # Add empty message as a child element so min_height constraint applies
             devices_box.add("No devices (press C to scan)")
-        
+
+       
         first_hbox.add(checkpoint_box)
         first_hbox.add(devices_box)
+     
+     
         master_vbox.add(first_hbox)
         
         # Second HBox: Telemetry and Actions
@@ -1007,7 +1018,10 @@ class App:
         telemetry_box = VBoxWithTitle("Telemetry:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_MEDIUM, min_width=UI_COL_1_MIN_WIDTH)
         # Add columns_hbox with width to make it expand and fill available space
         telemetry_box.add(columns_hbox, width=UI_COL_1_MIN_WIDTH)
-        
+
+        # Create Dial control for heading visualization
+        dial_control = Dial(self.telemetry, radius=60, font_small=self.font_small, fg_color=self.FG)
+
         
         # Actions section
         actions_box = VBoxWithTitle("Actions:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_SMALL, min_width=UI_COL_1_MIN_WIDTH)
@@ -1017,16 +1031,10 @@ class App:
                 actions_box.add(label)
         
         second_hbox.add(telemetry_box) 
+        second_hbox.add(dial_control)
         second_hbox.add(actions_box)
         master_vbox.add(second_hbox)
         
-        # # Create Dial control for heading visualization
-        # dial_control = Dial(self.telemetry, x=0, y=0, radius=60, font_small=self.font_small, fg_color=self.FG)
-        
-        # # Add dial in its own HBox
-        # dial_hbox = HBox(spacing=UI_SPACING_HBOX)
-        # dial_hbox.add(dial_control, width=dial_control.get_width(), height=dial_control.get_height())
-        # master_vbox.add(dial_hbox)
         
         # Message box section - add to master VBox
         self.message_box.set_size(self.WIDTH - 32, UI_LOG_HEIGHT)
