@@ -4,6 +4,7 @@ import json
 import time
 import threading
 import asyncio
+import math
 from typing import Any, Dict, List, Optional, Union, Tuple
 
 import pygame
@@ -496,6 +497,78 @@ class CheckpointTimeline:
                 label_y = line_y + cp_radius + 6
                 surface.blit(label, (label_x, label_y))
 
+class Dial:
+    """Control for displaying heading angle as a dial with needle."""
+    def __init__(self, telemetry: 'TelemetryState', x: int = 0, y: int = 0, 
+                 radius: int = 60, font_small: Optional[pygame.font.Font] = None, 
+                 fg_color=(235, 235, 235)):
+        self.telemetry = telemetry
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.font_small = font_small
+        self.fg_color = fg_color
+    
+    def get_width(self) -> int:
+        return self.radius * 2 + 40
+    
+    def get_height(self) -> int:
+        return self.radius * 2 + 60
+    
+    def draw(self, surface: pygame.Surface) -> None:
+        """Draw heading dial with needle."""
+        center_x = self.x + self.radius + 20
+        center_y = self.y + self.radius + 20
+        
+        # Draw dial circle (background)
+        pygame.draw.circle(surface, (60, 60, 60), (center_x, center_y), self.radius, 3)
+        
+        # Draw cardinal directions (N, E, S, W)
+        directions = [
+            (0, "N"),      # North (top)
+            (90, "E"),     # East (right)
+            (180, "S"),    # South (bottom)
+            (270, "W")     # West (left)
+        ]
+        
+        for angle, label in directions:
+            # Convert angle to radians (0° is up/north)
+            rad = math.radians(angle)
+            # Position text outside the circle
+            text_dist = self.radius + 15
+            text_x = center_x + math.sin(rad) * text_dist - 8
+            text_y = center_y - math.cos(rad) * text_dist - 8
+            
+            if self.font_small:
+                label_img = self.font_small.render(label, True, (150, 150, 150))
+                surface.blit(label_img, (text_x, text_y))
+        
+        # Draw heading needle
+        heading = self.telemetry.gz  # Angle between -180 and 180
+        # Convert heading to radians (0° is up/north)
+        needle_rad = math.radians(heading)
+        needle_length = self.radius - 10
+        needle_end_x = center_x + math.sin(needle_rad) * needle_length
+        needle_end_y = center_y - math.cos(needle_rad) * needle_length
+        
+        # Draw needle line
+        pygame.draw.line(surface, (255, 100, 100), (center_x, center_y), 
+                        (needle_end_x, needle_end_y), 3)
+        
+        # Draw needle head (small circle)
+        pygame.draw.circle(surface, (255, 100, 100), (int(needle_end_x), int(needle_end_y)), 5)
+        
+        # Draw center point
+        pygame.draw.circle(surface, (200, 200, 200), (center_x, center_y), 4)
+        
+        # Draw heading value below dial
+        if self.font_small:
+            heading_text = f"Heading: {heading:.1f}°"
+            heading_img = self.font_small.render(heading_text, True, self.fg_color)
+            heading_x = center_x - heading_img.get_width() // 2
+            heading_y = center_y + self.radius + 8
+            surface.blit(heading_img, (heading_x, heading_y))
+
 
 # BLE Controller (async BLE in thread)
 # -----------------------------
@@ -935,6 +1008,7 @@ class App:
         # Add columns_hbox with width to make it expand and fill available space
         telemetry_box.add(columns_hbox, width=UI_COL_1_MIN_WIDTH)
         
+        
         # Actions section
         actions_box = VBoxWithTitle("Actions:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_SMALL, min_width=UI_COL_1_MIN_WIDTH)
         if self.ble.config_actions:
@@ -942,9 +1016,17 @@ class App:
                 label = f"{act.get('label') or act.get('key','?').upper()} ({act.get('key','?').upper()})"
                 actions_box.add(label)
         
-        second_hbox.add(telemetry_box)
+        second_hbox.add(telemetry_box) 
         second_hbox.add(actions_box)
         master_vbox.add(second_hbox)
+        
+        # # Create Dial control for heading visualization
+        # dial_control = Dial(self.telemetry, x=0, y=0, radius=60, font_small=self.font_small, fg_color=self.FG)
+        
+        # # Add dial in its own HBox
+        # dial_hbox = HBox(spacing=UI_SPACING_HBOX)
+        # dial_hbox.add(dial_control, width=dial_control.get_width(), height=dial_control.get_height())
+        # master_vbox.add(dial_hbox)
         
         # Message box section - add to master VBox
         self.message_box.set_size(self.WIDTH - 32, UI_LOG_HEIGHT)
