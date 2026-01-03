@@ -1,155 +1,310 @@
-# MakeBlock bluetooth communication
+# MakeBlock Bluetooth Communication
 
-With this script, we can now communicate with the MakeBlock Bluetooth module without relying on the MakeBlock software! And more importantly, we can now use Arduino IDE to program the MakeBlock robot!
+A comprehensive suite of Python and Arduino tools for communicating with MakeBlock robots over Bluetooth Low Energy (BLE), without relying on the MakeBlock proprietary software.
 
-# How to use
-To test the code, you will need to have the following installed:
-- firmware_for_auriga.ino uploaded
-- Change the DEVICE_ADDRESS variable to the MAC address of your Bluetooth module
-  - Use your phone to find the MAC address of the Bluetooth module
-  - Or use the scan_robots.py script to find the MAC address of the Bluetooth module
-- Test the by changing the commented commands.
+**Key Advantage:** Now you can program your MakeBlock robot with Arduino IDE and control it entirely through custom Python scripts!
 
-# GUI Applications
-**AI generated content**
+## Project Structure
 
-This project includes two GUI applications for interacting with BLE devices:
+```
+python_auriga_bluetooth/
+├── arduino/                    # Arduino sketches for MakeBlock robots
+│   ├── auriga_ble_test/       # Main firmware for BLE communication
+│   └── beep_when_found/       # Utility for identifying robots
+├── cli_apps/                   # Command-line tools
+│   ├── scan_robots.py         # Discover and catalog robots
+│   ├── identify_bots.py       # Identify specific robot by beeping
+│   ├── ble_logger.py          # Log device characteristics
+│   ├── makeblock_bluetooth.py # Interactive terminal
+│   ├── makeblock_ble_lite.py  # Lightweight CLI
+│   └── auriga_firmware.py     # Firmware protocol interface
+├── gui_apps/                   # GUI applications
+│   ├── gui_ble.py             # Basic send/receive interface
+│   ├── gui_ble_wasd.py        # Keyboard-controlled robot
+│   ├── gui_ble_pygame.py      # Real-time Pygame interface
+│   └── gui_ble_telemetry.py   # Sensor data visualization
+├── monogame_ranger/            # C# MonoGame controller
+│   └── MonoGame_ranger/        # Desktop GL implementation
+└── README.md                   # This file
+```
 
-## gui_ble.py - Basic BLE Communication GUI
+## Quick Start
 
-### Location
-`gui_apps/gui_ble.py`
+### Installation
+```bash
+# Clone the repository
+git clone <repository-url>
+cd python_auriga_bluetooth
 
-### Features
-- **Device Scanner**: Scan for nearby BLE devices and select from a dropdown
-- **Manual Connection**: Enter device name manually if not found in scan
-- **Real-time Communication**: Send and receive messages with the connected device
-- **Message Configuration**: Choose line endings (NL, CR, BOTH, NONE)
-- **Header Support**: Optional header prefix (configurable via actions.json)
-- **Status Monitoring**: Real-time connection status display
-- **Device Persistence**: Remembers last connected device
+# Install Python dependencies
+pip install bleak pygame tkinter
 
-### How to Use
-1. **Launch the application**:
+# For Arduino sketches:
+# - Install Arduino IDE
+# - Install MakeBlock libraries
+# - Upload auriga_ble_test.ino to your robot
+```
+
+### First Time Setup
+1. **Upload firmware** to your MakeBlock Auriga:
+   - Open `arduino/auriga_ble_test/auriga_ble_test.ino` in Arduino IDE
+   - Select correct board (MakeBlock Auriga)
+   - Upload to robot
+
+2. **Discover your robot:**
    ```bash
-   python gui_apps/gui_ble.py
+   python cli_apps/scan_robots.py
+   ```
+   This creates `makeblock_robots.csv` with available devices.
+
+3. **Identify your specific robot:**
+   ```bash
+   python cli_apps/identify_bots.py
+   ```
+   Listen for beeping to identify which robot is which.
+
+4. **Start communicating:**
+   ```bash
+   python gui_apps/gui_ble.py        # Basic communication
+   python gui_apps/gui_ble_wasd.py   # Keyboard control
    ```
 
-2. **Connect to a device**:
-   - Click "Scan Devices" to discover nearby BLE devices
-   - Select a device from the dropdown, OR
-   - Enter the device name manually in the text field
-   - Click "Connect"
+## Documentation
 
-3. **Send messages**:
-   - Type your message in the text field
-   - Choose line ending format from dropdown
-   - Check "Header" if you want to include the configured header
-   - Click "Send"
+### Component Documentation
+- **[Arduino Sketches](arduino/README.md)** - Firmware for MakeBlock robots
+- **[CLI Applications](cli_apps/README.md)** - Command-line tools for scanning, logging, and communication
+- **[GUI Applications](gui_apps/README.md)** - Full-featured interfaces for control and monitoring
+- **[MonoGame Controller](monogame_ranger/README.md)** - C# alternative for Windows
 
-4. **Receive messages**:
-   - Incoming messages appear automatically in the main text area
+### Quick Reference
 
+#### GUI Applications
+#### GUI Applications
 
-## gui_ble_wasd.py - Advanced Robot Controller
+| Application | Framework | Purpose | Use Case |
+|---|---|---|---|
+| **gui_ble.py** | Tkinter | Basic send/receive | General communication |
+| **gui_ble_wasd.py** | Tkinter | WASD keyboard control | Robot movement |
+| **gui_ble_pygame.py** | Pygame | Real-time streaming | High-performance control |
+| **gui_ble_telemetry.py** | Pygame | Sensor visualization | Data monitoring |
 
-### Location
-`gui_apps/gui_ble_wasd.py`
+See [GUI Applications](gui_apps/README.md) for detailed documentation.
 
-### Features
-- **All basic BLE features** from gui_ble.py
-- **WASD Keyboard Control**: Real-time directional control using W/A/S/D keys
-- **Customizable Actions**: Configurable action buttons with keyboard shortcuts
-- **Frequency Control**: Adjustable transmission frequency for WASD commands
-- **Header Support**: Optional data header prefix (0xFF55 by default)
-- **Smart Input Management**: Automatically disables text input when keyboard control is active
+#### CLI Applications
 
-### How to Use
-1. **Launch the application**:
-   ```bash
-   python gui_apps/gui_ble_wasd.py
-   ```
+| Tool | Purpose | Typical Usage |
+|---|---|---|
+| **scan_robots.py** | Discover and catalog robots | Initial setup |
+| **identify_bots.py** | Identify specific robot by beeping | Find which robot is which |
+| **ble_logger.py** | Log device services/characteristics | Debugging/discovery |
+| **makeblock_bluetooth.py** | Interactive terminal interface | Manual testing |
+| **makeblock_ble_lite.py** | Lightweight CLI alternative | Resource-constrained use |
+| **auriga_firmware.py** | Firmware protocol interface | Sensor/motor control |
 
-2. **Connect to a device** (same as gui_ble.py)
+See [CLI Applications](cli_apps/README.md) for detailed documentation.
 
-3. **Configure actions** (if needed):
-   - Edit `gui_apps/actions.json` to customize commands
-   - Click "Reload Actions" to apply changes
+#### Arduino Sketches
 
-4. **Use keyboard control**:
-   - Check "Enable Keyboard Control" checkbox
-   - Use **W/A/S/D** keys for directional movement
-   - Use configured action keys (Q, E, R, etc.) for special commands
-   - Adjust frequency slider for command transmission rate
+| Sketch | Purpose | Features |
+|---|---|---|
+| **auriga_ble_test** | Main firmware | BLE communication, LED/buzzer control |
+| **beep_when_found** | Robot identification | Beeps on command for identification |
 
-5. **Manual message sending**:
-   - Uncheck "Enable Keyboard Control" to use manual text input
-   - Type messages and send as in gui_ble.py
+See [Arduino Sketches](arduino/README.md) for detailed documentation.
 
-### Configuration File (actions.json)
+## Common Tasks
+
+### Task: Send Simple Command to Robot
+```bash
+python gui_apps/gui_ble.py
+# 1. Click "Scan Devices"
+# 2. Select your robot
+# 3. Type "F" (forward) and click Send
+```
+
+### Task: Control Robot with Keyboard
+```bash
+python gui_apps/gui_ble_wasd.py
+# 1. Connect to robot
+# 2. Hold W/A/S/D to drive
+# 3. Adjust frequency with +/- keys
+```
+
+### Task: Identify Which Robot is Which
+```bash
+python cli_apps/identify_bots.py
+# Listen for beeping - each beep indicates which robot is being identified
+```
+
+### Task: Discover Device Characteristics
+```bash
+python cli_apps/ble_logger.py
+# Creates device_log.json with all services and characteristics
+```
+
+### Task: Program Custom Robot Behavior
+1. Edit `arduino/auriga_ble_test/auriga_ble_test.ino`
+2. Upload to robot via Arduino IDE
+3. Test with any Python CLI or GUI app
+
+## Configuration Files
+
+### actions.json
+Defines custom commands and directions for WASD apps:
 ```json
 {
   "header": [255, 85],
   "directions": {
     "w": "F",
-    "a": "L", 
+    "a": "L",
     "s": "B",
     "d": "R",
-    "stop": "DIR_STOP"
+    "e": "E",
+    "stop": "STOP"
   },
   "actions": [
     {
       "key": "q",
       "data": "LIGHT_TOGGLE",
-      "label": "Toggle Light"
-    },
-    {
-      "key": "e", 
-      "data": [255, 85, 2, 0],
-      "label": "Special Command"
-    },
-    {
-      "key": "r",
-      "data": "BEEP",
-      "label": "Beep Sound"
+      "label": "Light"
     }
   ]
 }
 ```
 
-#### Configuration Options:
-- **header**: Array of bytes to prefix to all messages when header option is enabled
-- **directions**: Payloads for W/A/S/D movement and stop command
-- **actions**: List of action buttons with:
-  - `key`: Keyboard shortcut
-  - `data`: Command payload (string, number, or byte array)
-  - `label`: Display name for the button
-
-### Keyboard Shortcuts (when keyboard control is enabled)
-- **W**: Forward
-- **A**: Left  
-- **S**: Backward
-- **D**: Right
-- **Q**: Toggle Light (default)
-- **E**: Special Command (default)
-- **R**: Beep Sound (default)
-
-### Data Formats
-Actions support multiple data formats:
-- **String**: `"LIGHT_TOGGLE"` → UTF-8 encoded
-- **Integer**: `255` → Single byte
-- **Byte Array**: `[255, 85, 2, 0]` → Sequence of bytes
-
-## Requirements
-- Python 3.7+
-- `bleak` library for BLE communication
-- `tkinter` (usually included with Python)
-
-Install dependencies:
-```bash
-pip install bleak
+### last_connected_device.json
+Automatically created - stores last connected device for quick reconnection:
+```json
+{
+  "name": "Makeblock_LE10a5622dd32e"
+}
 ```
 
-## Warning!
-For now the code is only in the super-alpha stage, so it may not work as expected. I will try to improve it as soon as possible.
+## Technical Details
+
+### BLE Characteristics
+Default MakeBlock UUIDs:
+- **Write:** `0000ffe3-0000-1000-8000-00805f9b34fb`
+- **Notify:** `0000ffe2-0000-1000-8000-00805f9b34fb`
+
+### Message Format
+```
+[HEADER] [DATA] [LINE_ENDING]
+```
+- **Header:** Optional 0xFF 0x55 (configurable)
+- **Data:** Command payload (string, bytes, or mixed)
+- **Line Ending:** \n, \r, \r\n, or none (configurable)
+
+### Baud Rate (Serial)
+All sketches use **115200 baud** for serial communication.
+
+## Requirements
+
+### Python
+- Python 3.7 or higher
+- pip package manager
+
+### Python Libraries
+```bash
+pip install bleak pygame
+```
+
+Optional:
+```bash
+pip install tkinter  # Usually pre-installed on most systems
+```
+
+### Arduino
+- Arduino IDE 1.8.0+
+- MakeBlock Auriga board support
+- MeAuriga library
+
+### Hardware
+- MakeBlock Auriga robot
+- Bluetooth 4.0+ compatible device (PC, laptop, Raspberry Pi)
+- USB cable for uploading firmware
+
+## Getting Help
+
+### Common Issues
+
+**"No Bluetooth adapter found"**
+- Check Bluetooth is enabled on your system
+- On Linux: `sudo systemctl start bluetooth`
+- On Mac/Windows: Enable Bluetooth in system settings
+
+**"Device not found"**
+- Run `scan_robots.py` to verify robot is discoverable
+- Ensure robot is powered on
+- Check if Bluetooth is not already connected to another app
+
+**"Cannot connect to device"**
+- Verify correct device name
+- Try scanning again with `scan_robots.py`
+- Check if device is in range (usually ~10 meters)
+
+**"Garbled messages received"**
+- Check line ending setting matches device
+- Verify baud rate is 115200 (for serial sketches)
+- Try different line ending options
+
+For more detailed troubleshooting, see:
+- [CLI Applications Troubleshooting](cli_apps/README.md#troubleshooting)
+- [GUI Applications Troubleshooting](gui_apps/README.md#troubleshooting)
+- [Arduino Sketches Troubleshooting](arduino/README.md#troubleshooting)
+
+## Contributing
+
+Contributions welcome! Areas for improvement:
+- Additional GUI applications
+- More robot sketches
+- Performance optimizations
+- Documentation improvements
+- Bug fixes and testing
+
+## License
+
+[Specify your license here]
+
+## References
+
+- [Bleak BLE Library](https://bleak.readthedocs.io/)
+- [MakeBlock Auriga](https://www.makeblock.com/products/mbot-ranger-audriga)
+- [Pygame Documentation](https://www.pygame.org/docs/)
+- [Arduino Reference](https://www.arduino.cc/reference/)
+- [Bluetooth Low Energy Overview](https://www.bluetooth.com/specifications/specs/core-specification/)
+
+## Project Status
+
+✅ **Alpha Stage** - Core functionality working, documentation improving
+- ✅ BLE device scanning and connection
+- ✅ Basic send/receive communication
+- ✅ Keyboard-based robot control
+- ✅ Sensor data logging
+- ✅ Multiple GUI frameworks
+- ⏳ Comprehensive test suite (in progress)
+- ⏳ Mobile app support (planned)
+- ⏳ Advanced telemetry visualization (in progress)
+
+## Changelog
+
+### Version 0.2 (Current)
+- Added CLI tools for device discovery
+- Added multiple GUI applications
+- Added C# MonoGame controller
+- Improved documentation with separate README files for each component
+- Support for custom action configurations
+
+### Version 0.1
+- Initial Python BLE communication tools
+- Basic GUI application
+
+---
+
+For detailed information about each component, see the respective README files:
+- [Arduino Sketches](arduino/README.md)
+- [CLI Applications](cli_apps/README.md)
+- [GUI Applications](gui_apps/README.md)
+- [MonoGame Controller](monogame_ranger/README.md)
 
