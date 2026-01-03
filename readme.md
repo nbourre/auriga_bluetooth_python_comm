@@ -23,8 +23,6 @@ python_auriga_bluetooth/
 │   ├── gui_ble_wasd.py        # Keyboard-controlled robot
 │   ├── gui_ble_pygame.py      # Real-time Pygame interface
 │   └── gui_ble_telemetry.py   # Sensor data visualization
-├── monogame_ranger/            # C# MonoGame controller
-│   └── MonoGame_ranger/        # Desktop GL implementation
 └── README.md                   # This file
 ```
 
@@ -75,7 +73,6 @@ pip install bleak pygame tkinter
 - **[Arduino Sketches](arduino/README.md)** - Firmware for MakeBlock robots
 - **[CLI Applications](cli_apps/README.md)** - Command-line tools for scanning, logging, and communication
 - **[GUI Applications](gui_apps/README.md)** - Full-featured interfaces for control and monitoring
-- **[MonoGame Controller](monogame_ranger/README.md)** - C# alternative for Windows
 
 ### Quick Reference
 
@@ -292,7 +289,6 @@ Contributions welcome! Areas for improvement:
 ### Version 0.2 (Current)
 - Added CLI tools for device discovery
 - Added multiple GUI applications
-- Added C# MonoGame controller
 - Improved documentation with separate README files for each component
 - Support for custom action configurations
 
@@ -306,5 +302,4 @@ For detailed information about each component, see the respective README files:
 - [Arduino Sketches](arduino/README.md)
 - [CLI Applications](cli_apps/README.md)
 - [GUI Applications](gui_apps/README.md)
-- [MonoGame Controller](monogame_ranger/README.md)
 
