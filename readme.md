@@ -153,3 +153,80 @@ pip install bleak
 ## Warning!
 For now the code is only in the super-alpha stage, so it may not work as expected. I will try to improve it as soon as possible.
 
+## MonoGame BLE Controller (DesktopGL)
+
+Location: `monogame_ranger/MonoGame_ranger/MonoGame_ranger`
+
+This C# MonoGame application mirrors the functionality of the Python `gui_ble_wasd.py` and `gui_ble_pygame.py` scripts, providing a real-time keyboard-driven BLE robot controller.
+
+### Features
+* Device scanning (press `C`) using `Plugin.BLE`.
+* Connect to selected device (`ENTER`).
+* WASD + `E` directional streaming at adjustable frequency.
+* Custom actions loaded from `actions.json` (string, int, byte arrays, mixed JSON tokens).
+* Optional header prefix toggle (`H`).
+* Cycle line endings (`F`): BOTH → NL → CR → NONE.
+* Manual text send mode (`T` then type + ENTER).
+* Live incoming data log (notifications) and sent payload log.
+* Graceful disconnect (`ESC`).
+
+### Controls Summary
+| Key | Action |
+|-----|--------|
+| C | Scan for BLE devices (6s) |
+| ↑ / ↓ | Select device from list |
+| ENTER | Connect to selected device |
+| H | Toggle header on/off |
+| F | Cycle line ending |
+| + / - | Increase / decrease streaming frequency (1–50 Hz) |
+| T | Enter manual text input mode |
+| ESC | Disconnect (if connected) or Exit |
+| W A S D E | Directional streaming commands |
+| (Action Keys) | Defined in `actions.json` (e.g. Q, R, etc.) |
+
+### actions.json Format (same as Python)
+```
+{
+  "header": [255, 85],
+  "directions": { "w": "F", "a": "L", "s": "B", "d": "R", "e": "E", "stop": "DIR_STOP" },
+  "actions": [ { "key": "q", "data": "LIGHT_TOGGLE", "label": "Light" } ]
+}
+```
+Supported `data` payload types: string, number, array of ints/hex strings, mixed arrays (e.g. `["0xFF", 2, "RUN"]`).
+
+### Build & Run
+Requirements:
+* .NET 8 SDK
+* MonoGame DesktopGL packages (already referenced)
+* `Plugin.BLE` (already referenced)
+
+Build:
+```pwsh
+dotnet build monogame_ranger/MonoGame_ranger/MonoGame_ranger/MonoGame_ranger.csproj
+```
+Run:
+```pwsh
+dotnet run --project monogame_ranger/MonoGame_ranger/MonoGame_ranger/MonoGame_ranger.csproj
+```
+
+### Customizing BLE Characteristics
+In `BleController.cs` you can set:
+```csharp
+ble.TargetServiceUuid = Guid.Parse("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
+ble.TargetWriteCharacteristicUuid = Guid.Parse("yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy");
+ble.TargetNotifyCharacteristicUuid = Guid.Parse("zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz");
+```
+If left null the first writable / notifiable characteristics found are used.
+
+### Notes
+* Direction streaming thread resends the last direction at configured frequency until key released (then sends stop payload).
+* Header bytes are prepended only when toggled ON.
+* Line endings appended after header+core; choose NONE for raw binary.
+* Incoming notification bytes are hex-dumped in the log.
+
+### Future Improvements
+* In-game UI overlays for frequency & connection state.
+* Persist last connected device and user settings.
+* Optional gamepad support for directions.
+
+
