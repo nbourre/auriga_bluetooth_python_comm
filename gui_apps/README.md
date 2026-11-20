@@ -311,16 +311,15 @@ All apps support configurable message formatting:
 ## Installation
 
 ### Requirements
-- Python 3.7+
+- Python 3.10+
 - Bleak (BLE library)
-- Tkinter (usually included, for Tkinter apps)
-- Pygame (for Pygame apps)
+- Tkinter (part of Python, for Tkinter apps; on Debian/Ubuntu: `sudo apt install python3-tk`)
+- Pygame (for Pygame apps; installed as `pygame-ce`)
 
 ### Install Dependencies
+From the repository root, in a virtual environment (see the main [README](../readme.md#installation)):
 ```bash
-pip install bleak
-pip install pygame      # For pygame apps
-pip install tkinter     # Usually pre-installed
+pip install -r requirements.txt
 ```
 
 ### Verify Installation

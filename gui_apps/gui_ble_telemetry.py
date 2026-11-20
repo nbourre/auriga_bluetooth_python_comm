@@ -1,36 +1,17 @@
-import os
-import sys
 import json
-import time
-import threading
-import asyncio
 import math
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional
 
 import pygame
-from bleak import BleakClient, BleakScanner
 
-# -----------------------------
-# BLE characteristic UUIDs (adjust if your device differs)
-# -----------------------------
-CHARACTERISTIC_NOTIFY_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"  # notifications
-CHARACTERISTIC_WRITE_UUID  = "0000ffe3-0000-1000-8000-00805f9b34fb"  # write
+from actions_config import ActionsConfig
+from ble_connection import END_DATA_OPTIONS, BleConnection, LineAssembler
+from drive_controller import DEFAULT_FREQUENCY_HZ, DriveController
+from message_history import MessageHistory
+from pygame_parts import DeviceSelector, TextInputBox, key_to_char
 
-# -----------------------------
-# App constants
-# -----------------------------
-DEVICE_FILE = "last_connected_device.json"
-ACTIONS_FILE = "actions.json"  # expected in current working directory
+LINE_ENDING_ORDER = ['NL', 'CR', 'BOTH', 'NONE']
 
-END_DATA_OPTIONS: Dict[str, bytes] = {
-    'NL': b'\n',
-    'CR': b'\r',
-    'BOTH': b'\r\n',
-    'NONE': b''
-}
-
-DEFAULT_FREQUENCY_HZ = 10.0
-DEFAULT_HEADER = [0xFF, 0x55]
 TOTAL_CHECKPOINTS = 6
 
 # UI Layout constants
@@ -84,20 +65,6 @@ class TelemetryState:
         if cp is not None and 1 <= cp <= TOTAL_CHECKPOINTS:
             self.completed_checkpoints.add(cp)
             self.last_checkpoint = cp
-
-# -----------------------------
-# Helpers
-# -----------------------------
-PayloadType = Union[str, int, List[int]]
-
-def to_bytes(payload: PayloadType) -> bytes:
-    if isinstance(payload, str):
-        return payload.encode('utf-8')
-    if isinstance(payload, int):
-        return bytes([payload & 0xFF])
-    if isinstance(payload, list):
-        return bytes([int(x) & 0xFF for x in payload])
-    raise TypeError(f"Unsupported payload type: {type(payload)}")
 
 # -----------------------------
 # Pygame UI helpers
@@ -578,323 +545,6 @@ class Dial:
             surface.blit(heading_img, (heading_x, heading_y))
 
 
-# BLE Controller (async BLE in thread)
-# -----------------------------
-class BleController:
-    def __init__(self, log: TextLog, telemetry: TelemetryState):
-        self.log = log
-        self.telemetry = telemetry
-        self.client: Optional[BleakClient] = None
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self.loop_running = False
-        self.loop_thread: Optional[threading.Thread] = None
-
-        self.discovered: List[Tuple[str, str]] = []  # list of (name, address)
-        self.selected_index: int = 0
-
-        # config
-        self.config_directions: Dict[str, PayloadType] = {}
-        self.config_stop: Optional[PayloadType] = None
-        self.config_actions: List[Dict[str, Any]] = []
-        self.config_header: List[int] = DEFAULT_HEADER.copy()
-
-        # runtime options
-        self.use_header: bool = False
-        self.line_ending_key: str = 'BOTH'
-
-        # WASD streaming state
-        self._pressed: set[str] = set()
-        self._current_dir: Optional[str] = None
-        self._dir_payload: Optional[bytes] = None
-        self._dir_period_s: float = 1.0 / DEFAULT_FREQUENCY_HZ
-        self._dir_thread_stop = threading.Event()
-        self._dir_thread = threading.Thread(target=self._direction_sender_loop, daemon=True)
-
-        # Message buffering for notifications
-        self._rx_buffer = ""
-
-        # start event loop thread
-        self._start_loop_thread()
-        self._dir_thread.start()
-
-    # --------------- asyncio loop ---------------
-    def _start_loop_thread(self) -> None:
-        def run():
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            self.loop_running = True
-            try:
-                self.loop.run_forever()
-            finally:
-                self.loop_running = False
-        self.loop_thread = threading.Thread(target=run, daemon=True)
-        self.loop_thread.start()
-        time.sleep(0.05)
-
-    def run_coro(self, coro):
-        if self.loop and self.loop_running:
-            return asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return None
-
-    # --------------- config ---------------
-    def load_actions_config(self) -> None:
-        path = os.path.join(os.getcwd(), ACTIONS_FILE)
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-        except FileNotFoundError:
-            cfg = {
-                "header": [255, 85],
-                "directions": {"w":"F","a":"L","s":"B","d":"R","e":"K","stop":"S"},
-                "actions": [
-                    {"key":"l", "data":"LIGHT_TOGGLE", "label":"Toggle Light"}
-                ]
-            }
-            with open(path, 'w', encoding='utf-8') as wf:
-                json.dump(cfg, wf, indent=2)
-
-        # validate and copy
-        dirs = cfg.get("directions", {})
-        stop = dirs.get("stop")
-        if not all(k in dirs for k in ("w","a","s","d","e")) or stop is None:
-            raise ValueError("'directions' must define w,a,s,d,e and stop")
-        self.config_directions = {k: dirs[k] for k in ("w","a","s","d","e")}
-        self.config_stop = stop
-
-        header_cfg = cfg.get("header", DEFAULT_HEADER)
-        if isinstance(header_cfg, list) and all(isinstance(x, int) for x in header_cfg):
-            self.config_header = header_cfg
-        else:
-            self.config_header = DEFAULT_HEADER.copy()
-
-        self.config_actions = []
-        for item in cfg.get("actions", []):
-            key = str(item.get("key", "")).lower()
-            if not key:
-                continue
-            self.config_actions.append({
-                "key": key,
-                "data": item.get("data"),
-                "label": item.get("label", key.upper())
-            })
-        hdr_hex = ' '.join(f'0x{b:02X}' for b in self.config_header)
-        self.log.add(f"Loaded actions.json. Header: [{hdr_hex}]\n")
-
-    # --------------- device persistence ---------------
-    def save_last_device(self, device_name: str) -> None:
-        try:
-            with open(DEVICE_FILE, 'w', encoding='utf-8') as f:
-                json.dump({"device_name": device_name}, f)
-        except Exception:
-            pass
-
-    def load_last_device(self) -> Optional[str]:
-        try:
-            if not os.path.exists(DEVICE_FILE):
-                return None
-            with open(DEVICE_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return data.get("device_name")
-        except Exception:
-            return None
-
-    # --------------- BLE ops ---------------
-    def start_scan(self, timeout: float = 8.0) -> None:
-        self.run_coro(self._scan_devices(timeout))
-
-    async def _scan_devices(self, timeout: float) -> None:
-        try:
-            self.log.add(f"Scanning for devices for {timeout:.0f}s...\n")
-            devices = await BleakScanner.discover(timeout=timeout)
-            discovered: List[Tuple[str, str]] = []
-            for d in devices:
-                if d.name:
-                    discovered.append((d.name, d.address))
-            discovered.sort(key=lambda t: t[0].lower())
-            self.discovered = discovered
-            self.selected_index = 0 if self.discovered else -1
-            self.log.add(f"Found {len(self.discovered)} device(s).\n")
-        except Exception as e:
-            self.log.add(f"Scan error: {e}\n")
-
-    def connect_selected(self) -> None:
-        if 0 <= self.selected_index < len(self.discovered):
-            name, addr = self.discovered[self.selected_index]
-            self.run_coro(self._async_connect(name, addr))
-
-    async def _async_connect(self, device_name: str, address: Optional[str]) -> None:
-        try:
-            if self.client and self.client.is_connected:
-                await self.client.disconnect()
-            self.client = BleakClient(address)
-            await self.client.connect()
-            if self.client.is_connected:
-                self.log.add(f"Connected to {device_name} ({address}).\n")
-                self.save_last_device(device_name)
-                await self._start_notifications()
-            else:
-                self.log.add("Connection failed.\n")
-        except Exception as e:
-            self.log.add(f"Connect error: {e}\n")
-
-    async def _start_notifications(self) -> None:
-        async def handler(sender, data: bytes):
-            try:
-                decoded = data.decode('utf-8', errors='ignore')
-                self._rx_buffer += decoded
-                # Process complete messages (delimited by newline)
-                while '\n' in self._rx_buffer:
-                    message, self._rx_buffer = self._rx_buffer.split('\n', 1)
-                    if message.strip():  # Only log non-empty lines
-                        try:
-                            json_data = json.loads(message)
-                            self.telemetry.update_from_json(json_data)
-                        except json.JSONDecodeError:
-                            # Not JSON, display raw message
-                            self.log.add(f"Received: {message.strip()}\n")
-            except Exception as e:
-                self.log.add(f"Handler error: {e}\n")
-        try:
-            if self.client:
-                await self.client.start_notify(CHARACTERISTIC_NOTIFY_UUID, handler)
-                self.log.add("Started notifications.\n")
-        except Exception as e:
-            self.log.add(f"Notify error: {e}\n")
-
-    def disconnect(self) -> None:
-        self.run_coro(self._async_disconnect())
-
-    async def _async_disconnect(self) -> None:
-        try:
-            if self.client and self.client.is_connected:
-                await self.client.disconnect()
-                self.log.add("Disconnected.\n")
-        except Exception as e:
-            self.log.add(f"Disconnect error: {e}\n")
-
-    def send(self, payload: bytes, use_header: Optional[bool] = None) -> None:
-        self.run_coro(self._async_write(payload, use_header))
-
-    async def _async_write(self, payload: bytes, use_header: Optional[bool] = None) -> None:
-        try:
-            if not self.client:
-                return
-            add_header = self.use_header if use_header is None else use_header
-            final_payload = payload
-            if add_header and self.config_header:
-                final_payload = bytes(self.config_header) + payload
-            await self.client.write_gatt_char(CHARACTERISTIC_WRITE_UUID, final_payload)
-        except Exception as e:
-            self.log.add(f"Send error: {e}\n")
-
-    # --------------- WASD streaming ---------------
-    def set_frequency(self, hz: float) -> None:
-        hz = max(1.0, float(hz))
-        self._dir_period_s = 1.0 / hz
-
-    def handle_keydown(self, key: str) -> None:
-        key = key.lower()
-        if key in self._pressed:
-            return
-        # Direction keys
-        if key in ('w','a','s','d','e'):
-            self._pressed.add(key)
-            self._start_direction_stream(key)
-            return
-        # one-shot actions
-        for act in self.config_actions:
-            if act.get("key") == key:
-                self._pressed.add(key)
-                self._trigger_action(act)
-                return
-
-    def handle_keyup(self, key: str) -> None:
-        key = key.lower()
-        if key in self._pressed:
-            self._pressed.discard(key)
-            if key == self._current_dir:
-                self._send_dir_stop()
-                self._current_dir = None
-                self._dir_payload = None
-
-    def _start_direction_stream(self, key: str) -> None:
-        if not (self.client and self.client.is_connected):
-            return
-        # payload
-        raw = self.config_directions.get(key)
-        if raw is None:
-            self.log.add(f"No payload for '{key}'.\n")
-            return
-        try:
-            payload = to_bytes(raw)
-        except Exception as e:
-            self.log.add(f"Invalid payload for '{key}': {e}\n")
-            return
-        end = END_DATA_OPTIONS.get(self.line_ending_key, b'')
-        payload_with_end = payload + end
-        self._current_dir = key
-        self._dir_payload = payload_with_end
-        # send first immediately
-        self.send(payload_with_end)
-
-    def _send_dir_stop(self) -> None:
-        if not (self.client and self.client.is_connected):
-            return
-        if self.config_stop is None:
-            return
-        try:
-            payload = to_bytes(self.config_stop)
-            end = END_DATA_OPTIONS.get(self.line_ending_key, b'')
-            payload_with_end = payload + end
-            self.send(payload_with_end)
-            self.log.add(f"Sent stop.\n")
-        except Exception as e:
-            self.log.add(f"Invalid stop payload: {e}\n")
-
-    def _direction_sender_loop(self) -> None:
-        last_sent = 0.0
-        while not self._dir_thread_stop.is_set():
-            now = time.time()
-            if (self._current_dir and self._dir_payload and self.client and
-                self.client.is_connected and self._dir_period_s > 0):
-                if now - last_sent >= self._dir_period_s:
-                    fut = self.run_coro(self._async_write(self._dir_payload))
-                    if fut:
-                        last_sent = now
-            time.sleep(0.005)
-
-    # --------------- cleanup ---------------
-    def shutdown(self) -> None:
-        try:
-            self._dir_thread_stop.set()
-            if self.client and self.client.is_connected:
-                fut = self.run_coro(self.client.disconnect())
-                if fut:
-                    fut.result(timeout=2.0)
-        except Exception:
-            pass
-        if self.loop and self.loop_running:
-            self.loop.call_soon_threadsafe(self.loop.stop)
-        if self.loop_thread and self.loop_thread.is_alive():
-            self.loop_thread.join(timeout=1.0)
-
-    # --------------- actions ---------------
-    def _trigger_action(self, act: Dict[str, Any]) -> None:
-        if not (self.client and self.client.is_connected):
-            self.log.add("Not connected.\n")
-            return
-        data = act.get("data")
-        try:
-            payload = to_bytes(data)
-            end = END_DATA_OPTIONS.get(self.line_ending_key, b'')
-            payload_with_end = payload + end
-        except Exception as e:
-            self.log.add(f"Invalid action payload: {e}\n")
-            return
-        self.send(payload_with_end)
-        shown = act.get("label") or act.get("key", "?").upper()
-        self.log.add(f"Action sent: {shown}\n")
-
 # -----------------------------
 # Main App
 # -----------------------------
@@ -918,24 +568,63 @@ class App:
         log_y = self.HEIGHT - UI_LOG_HEIGHT - UI_LOG_BOTTOM_OFFSET
         self.message_box = MessageBox(UI_MARGIN_LEFT, log_y, self.WIDTH - 32, UI_LOG_HEIGHT, font=self.font_small)
         
-        self.telemetry = TelemetryState()
-        self.ble = BleController(self.message_box, self.telemetry)
-        self.ble.load_actions_config()
+        # Runtime options
+        self.use_header = False
+        self.line_ending_key = 'BOTH'
+        self.frequency = float(DEFAULT_FREQUENCY_HZ)
 
-        self.frequency = DEFAULT_FREQUENCY_HZ
-        self.ble.set_frequency(self.frequency)
+        # Components
+        self.telemetry = TelemetryState()
+        self.conn = BleConnection()
+        self.conn.log.connect(self.message_box.add)
+        self.conn.rx.connect(self._on_rx)
+        self.conn.payload_wrapper = self._add_header
+        self._rx_lines = LineAssembler()
+
+        self.actions_config = ActionsConfig()
+        self.actions_config.load()
+        self.message_box.add(f"Loaded actions.json. Header: [{self.actions_config.header_hex}]\n")
+
+        self.devices = DeviceSelector(self.conn)
+        self.drive = DriveController(self.conn, self.actions_config, self._end_data, self.frequency)
+        self.text_input = TextInputBox(self._send_manual_text, MessageHistory.per_user())
 
         # UI state
         self.running = True
-        self.mode = 'idle'  # 'idle' | 'scanning' | 'connected' | 'select'
-        
-        # Text input state
-        self.text_input_mode = False
-        self.text_input_buffer = ""
+        self.mode = 'scanning'  # 'idle' | 'scanning' | 'connected' | 'select'
 
         # initial scan to speed things up
-        self.mode = 'scanning'
-        self.ble.start_scan(6.0)
+        self.conn.scan(6.0)
+
+    # ----------- helpers -----------
+    def _end_data(self) -> bytes:
+        return END_DATA_OPTIONS.get(self.line_ending_key, b'')
+
+    def _add_header(self, payload: bytes) -> bytes:
+        return self.actions_config.with_header(payload) if self.use_header else payload
+
+    def _on_rx(self, chunk: str) -> None:
+        """Feed JSON telemetry lines to the telemetry state, log the others (called from the BLE thread)."""
+        for line in self._rx_lines.feed(chunk):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                try:
+                    self.telemetry.update_from_json(json.loads(line))
+                except json.JSONDecodeError:
+                    # Not JSON, display raw message
+                    self.message_box.add(f"Received: {line}\n")
+            except Exception as e:
+                self.message_box.add(f"Handler error: {e}\n")
+
+    def _send_manual_text(self, text: str) -> bool:
+        """Send manually typed text. Returns True if it was sent."""
+        if not self.conn.send_text(text, self._end_data()):
+            return False
+        hdr_info = " (with header)" if self.use_header else ""
+        self.message_box.add(f"Sent: {text}{hdr_info}\n")
+        return True
 
     # ----------- rendering -----------
     def draw_header(self) -> None:
@@ -947,8 +636,9 @@ class App:
         y += img.get_height() + UI_SECTION_SPACING
         
         # Connection status
-        status = "CONNECTED" if (self.ble.client and self.ble.client.is_connected) else "DISCONNECTED"
-        status_color = (0, 200, 100) if (self.ble.client and self.ble.client.is_connected) else (255, 80, 80)
+        connected = self.conn.is_connected
+        status = "CONNECTED" if connected else "DISCONNECTED"
+        status_color = (0, 200, 100) if connected else (255, 80, 80)
         img = self.font.render(f"Status: {status}", True, status_color)
         self.screen.blit(img, (UI_MARGIN_LEFT, y))
         y += img.get_height() + UI_SECTION_SPACING
@@ -971,11 +661,11 @@ class App:
         
         # Available Devices section
         devices_box = VBoxWithTitle("Available Devices:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_SMALL, min_width=UI_COL_1_MIN_WIDTH, min_height=UI_DEVICE_MIN_HEIGHT)
-        if self.ble.discovered:
-            for i, (nm, addr) in enumerate(self.ble.discovered[:UI_DEVICE_MAX]):
-                sel = (i == self.ble.selected_index)
+        if self.devices.devices:
+            for i, dev in enumerate(self.devices.devices[:UI_DEVICE_MAX]):
+                sel = (i == self.devices.selected_index)
                 color = self.ACCENT if sel else (200, 200, 200)
-                text = f"{'► ' if sel else '  '} {nm}"
+                text = f"{'► ' if sel else '  '} {dev.name}"
                 devices_box.add(text)
         else:
             # Add empty message as a child element so min_height constraint applies
@@ -1025,8 +715,8 @@ class App:
         
         # Actions section
         actions_box = VBoxWithTitle("Actions:", title_font=self.font, title_color=self.FG, spacing=UI_SPACING_SMALL, min_width=UI_COL_1_MIN_WIDTH)
-        if self.ble.config_actions:
-            for act in self.ble.config_actions[:UI_ACTION_MAX]:
+        if self.actions_config.actions:
+            for act in self.actions_config.actions[:UI_ACTION_MAX]:
                 label = f"{act.get('label') or act.get('key','?').upper()} ({act.get('key','?').upper()})"
                 actions_box.add(label)
         
@@ -1044,12 +734,9 @@ class App:
         master_vbox.draw(self.screen, font=self.font_small, color=self.FG)
         
         # text input overlay
-        if self.text_input_mode:
-            input_y = self.HEIGHT - UI_LOG_INPUT_HEIGHT
-            pygame.draw.rect(self.screen, (50,120,200), pygame.Rect(0, input_y, self.WIDTH, UI_LOG_INPUT_HEIGHT))
-            prompt_text = f"Type message (ESC to cancel, ENTER to send): {self.text_input_buffer}_"
-            img = self.font.render(prompt_text, True, (255,255,255))
-            self.screen.blit(img, (UI_MARGIN_LEFT, input_y + 20))
+        self.text_input.draw(self.screen, self.font,
+                             pygame.Rect(0, self.HEIGHT - UI_LOG_INPUT_HEIGHT, self.WIDTH, UI_LOG_INPUT_HEIGHT),
+                             margin=UI_MARGIN_LEFT)
 
     def _draw_telemetry_data(self, x: int, y: int) -> int:
         """Draw telemetry data section using VBoxWithTitle containing HBox. Returns new y position."""
@@ -1105,111 +792,48 @@ class App:
         if ev.type == pygame.QUIT:
             self.running = False
         elif ev.type == pygame.KEYDOWN:
-            # Handle text input mode separately
-            if self.text_input_mode:
-                self._handle_text_input(ev)
+            # Text input mode captures all keys
+            if self.text_input.active:
+                self.text_input.handle_key(ev)
                 return
-            
+
             if ev.key == pygame.K_ESCAPE:
                 # disconnect or quit
-                if self.ble.client and self.ble.client.is_connected:
-                    self.ble.disconnect()
+                if self.conn.is_connected:
+                    self.conn.disconnect()
                 else:
                     self.running = False
             elif ev.key == pygame.K_c:
                 self.mode = 'scanning'
-                self.ble.start_scan(6.0)
+                self.conn.scan(6.0)
             elif ev.key == pygame.K_t:
-                # Toggle text input mode
-                self.text_input_mode = True
-                self.text_input_buffer = ""
+                self.text_input.open()
             elif ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                self.ble.connect_selected()
+                self.devices.connect_selected()
             elif ev.key == pygame.K_UP:
-                if self.ble.discovered:
-                    self.ble.selected_index = max(0, self.ble.selected_index - 1)
+                self.devices.move(-1)
             elif ev.key == pygame.K_DOWN:
-                if self.ble.discovered:
-                    self.ble.selected_index = min(len(self.ble.discovered)-1, self.ble.selected_index + 1)
+                self.devices.move(+1)
             elif ev.key == pygame.K_h:
-                self.ble.use_header = not self.ble.use_header
+                self.use_header = not self.use_header
             elif ev.key in (pygame.K_f, pygame.K_F1):
                 # cycle line endings
-                order = ['NL','CR','BOTH','NONE']
-                i = order.index(self.ble.line_ending_key) if self.ble.line_ending_key in order else 2
-                self.ble.line_ending_key = order[(i+1) % len(order)]
+                i = LINE_ENDING_ORDER.index(self.line_ending_key) if self.line_ending_key in LINE_ENDING_ORDER else 2
+                self.line_ending_key = LINE_ENDING_ORDER[(i + 1) % len(LINE_ENDING_ORDER)]
             elif ev.key in (pygame.K_PLUS, pygame.K_EQUALS):
                 self.frequency = min(60.0, self.frequency + 1)
-                self.ble.set_frequency(self.frequency)
+                self.drive.set_frequency(self.frequency)
             elif ev.key in (pygame.K_MINUS, pygame.K_UNDERSCORE):
                 self.frequency = max(1.0, self.frequency - 1)
-                self.ble.set_frequency(self.frequency)
+                self.drive.set_frequency(self.frequency)
             else:
-                # map letter keys to chars if possible
-                ch = self._pygame_key_to_char(ev.key)
+                ch = key_to_char(ev.key)
                 if ch:
-                    self.ble.handle_keydown(ch)
+                    self.drive.key_down(ch)
         elif ev.type == pygame.KEYUP:
-            ch = self._pygame_key_to_char(ev.key)
+            ch = key_to_char(ev.key)
             if ch:
-                self.ble.handle_keyup(ch)
-
-    def _handle_text_input(self, ev: pygame.event.Event) -> None:
-        """Handle keyboard input when in text input mode."""
-        if ev.key == pygame.K_ESCAPE:
-            # Cancel text input
-            self.text_input_mode = False
-            self.text_input_buffer = ""
-        elif ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-            # Send the message
-            if self.text_input_buffer.strip():
-                self._send_manual_text(self.text_input_buffer)
-            self.text_input_mode = False
-            self.text_input_buffer = ""
-        elif ev.key == pygame.K_BACKSPACE:
-            self.text_input_buffer = self.text_input_buffer[:-1]
-        elif ev.key == pygame.K_SPACE:
-            self.text_input_buffer += " "
-        else:
-            # Try to get the character from the key
-            ch = self._pygame_key_to_printable(ev)
-            if ch:
-                self.text_input_buffer += ch
-
-    def _send_manual_text(self, text: str) -> None:
-        """Send manually typed text to the BLE device."""
-        if not (self.ble.client and self.ble.client.is_connected):
-            self.message_box.add("Not connected.\n")
-            return
-        try:
-            payload = text.encode('utf-8')
-            end = END_DATA_OPTIONS.get(self.ble.line_ending_key, b'')
-            payload_with_end = payload + end
-            self.ble.send(payload_with_end)
-            hdr_info = " (with header)" if self.ble.use_header else ""
-            self.message_box.add(f"Sent: {text}{hdr_info}\n")
-        except Exception as e:
-            self.message_box.add(f"Send error: {e}\n")
-
-    @staticmethod
-    def _pygame_key_to_char(key: int) -> Optional[str]:
-        # Letters and digits mapping
-        if pygame.K_a <= key <= pygame.K_z:
-            return chr(key)
-        if pygame.K_0 <= key <= pygame.K_9:
-            return chr(key)
-        return None
-
-    @staticmethod
-    def _pygame_key_to_printable(ev: pygame.event.Event) -> Optional[str]:
-        """Convert pygame key event to printable character, handling shift."""
-        # Use unicode if available (respects shift, caps lock, etc.)
-        if ev.unicode and ev.unicode.isprintable():
-            return ev.unicode
-        # Fallback for special keys
-        if ev.key == pygame.K_SPACE:
-            return " "
-        return None
+                self.drive.key_up(ch)
 
     # ----------- main loop -----------
     def run(self) -> None:
@@ -1223,7 +847,8 @@ class App:
                 pygame.display.flip()
                 self.clock.tick(60)
         finally:
-            self.ble.shutdown()
+            self.drive.shutdown()
+            self.conn.shutdown()
             pygame.quit()
 
 

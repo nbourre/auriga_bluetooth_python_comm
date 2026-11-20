@@ -23,25 +23,39 @@ python_auriga_bluetooth/
 │   ├── gui_ble_wasd.py        # Keyboard-controlled robot
 │   ├── gui_ble_pygame.py      # Real-time Pygame interface
 │   └── gui_ble_telemetry.py   # Sensor data visualization
+├── requirements.txt            # Python dependencies (pip install -r)
 └── README.md                   # This file
 ```
 
 ## Quick Start
 
 ### Installation
+
+Requires Python 3.10 or higher (see [Requirements](#requirements) for tkinter and Bluetooth notes).
+
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone <repository-url>
 cd python_auriga_bluetooth
 
-# Install Python dependencies
-pip install bleak pygame tkinter
+# 2. Create a virtual environment
+python3 -m venv .venv            # Windows: py -m venv .venv
 
-# For Arduino sketches:
-# - Install Arduino IDE
-# - Install MakeBlock libraries
-# - Upload auriga_ble_test.ino to your robot
+# 3. Activate it
+source .venv/bin/activate        # Linux / macOS
+.venv\Scripts\Activate.ps1       # Windows (PowerShell)
+.venv\Scripts\activate.bat       # Windows (cmd)
+
+# 4. Install the dependencies
+pip install -r requirements.txt
 ```
+
+Activate the environment (step 3) again each time you open a new terminal.
+
+For the Arduino sketches:
+- Install Arduino IDE
+- Install MakeBlock libraries
+- Upload `auriga_ble_test.ino` to your robot
 
 ### First Time Setup
 1. **Upload firmware** to your MakeBlock Auriga:
@@ -199,18 +213,32 @@ All sketches use **115200 baud** for serial communication.
 ## Requirements
 
 ### Python
-- Python 3.7 or higher
-- pip package manager
+- Python 3.10 or higher (with the `venv` module and `pip`)
 
 ### Python Libraries
-```bash
-pip install bleak pygame
-```
+Listed in [requirements.txt](requirements.txt) and installed with `pip install -r requirements.txt`:
 
-Optional:
-```bash
-pip install tkinter  # Usually pre-installed on most systems
-```
+| Package | Used by | Notes |
+|---|---|---|
+| `bleak` | all apps | Picks its Bluetooth backend per OS automatically (Windows: WinRT, macOS: CoreBluetooth, Linux: BlueZ via D-Bus). Nothing to choose. |
+| `pygame-ce` | `gui_ble_pygame.py`, `gui_ble_telemetry.py` | Maintained fork of `pygame`, same `import pygame`. Don't install both. |
+
+### Tkinter
+`gui_ble.py` and `gui_ble_wasd.py` use tkinter. It is part of Python, **not** a pip package, but some systems ship it separately:
+
+| OS | What to do |
+|---|---|
+| Windows | Included with the python.org installer |
+| macOS | Included with the python.org installer; with Homebrew: `brew install python-tk` |
+| Debian / Ubuntu / Raspberry Pi OS | `sudo apt install python3-tk` |
+| Fedora | `sudo dnf install python3-tkinter` |
+
+Check with `python3 -m tkinter` (a small test window should open).
+
+### Bluetooth by OS
+- **Windows 10/11:** Bluetooth must be turned on in Settings. No driver or extra package needed.
+- **macOS:** the first run asks for Bluetooth permission for your terminal / IDE. Allow it (System Settings → Privacy & Security → Bluetooth).
+- **Linux:** the BlueZ service must be running (`systemctl status bluetooth`). On Debian/Ubuntu: `sudo apt install bluez`.
 
 ### Arduino
 - Arduino IDE 1.8.0+

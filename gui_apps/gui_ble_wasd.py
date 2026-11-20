@@ -1,79 +1,17 @@
-import json
-import os
-import threading
 import time
 import tkinter as tk
 from tkinter import messagebox
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
-from ble_connection import BleConnection, to_bytes
+from actions_config import DIRECTION_KEYS, ActionsConfig
+from ble_connection import BleConnection
 from ble_widgets import ConnectionPanel, LogView, MessageSender, ScannerPanel
-
-ACTIONS_FILE = "actions.json"  # in the current working directory
-DEFAULT_FREQUENCY_HZ = 10      # default send frequency for WASD
-DEFAULT_HEADER = [0xFF, 0x55]  # default header
-DIRECTION_KEYS = ('w', 'a', 's', 'd', 'e')
+from drive_controller import DEFAULT_FREQUENCY_HZ, DriveController
 
 
 # -----------------------------
-# Configuration (actions.json)
+# Actions panel
 # -----------------------------
-class ActionsConfig:
-    """Contents of actions.json: header, direction payloads and one-shot actions."""
-
-    def __init__(self, filename: str = ACTIONS_FILE) -> None:
-        self.filename = filename
-        self.directions: Dict[str, Any] = {}
-        self.stop: Any = None
-        self.actions: List[Dict[str, Any]] = []
-        self.header: List[int] = DEFAULT_HEADER.copy()
-
-    def load(self) -> None:
-        """Load the file (creating it with default values if it does not exist).
-
-        Raises ValueError if the content is invalid.
-        """
-        path = os.path.join(os.getcwd(), self.filename)
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-        except FileNotFoundError:
-            cfg = {
-                "header": [255, 85],
-                "directions": {"w": "F", "a": "L", "s": "B", "d": "R", "e": "K", "stop": "S"},
-                "actions": [
-                    {"key": "l", "data": "LIGHT_TOGGLE", "label": "Toggle Light"},
-                    {"key": "z", "data": [255, 85], "label": "Special Command"}
-                ]
-            }
-            with open(path, 'w', encoding='utf-8') as wf:
-                json.dump(cfg, wf, indent=2)
-
-        dirs = cfg.get("directions", {})
-        stop = dirs.get("stop")
-        if not all(k in dirs for k in DIRECTION_KEYS) or stop is None:
-            raise ValueError("'directions' must define w,a,s,d,e (klaxon) and stop")
-        self.directions = {k: dirs[k] for k in DIRECTION_KEYS}
-        self.stop = stop
-
-        header = cfg.get("header", DEFAULT_HEADER)
-        if isinstance(header, list) and all(isinstance(x, int) for x in header):
-            self.header = header
-        else:
-            self.header = DEFAULT_HEADER.copy()
-
-        self.actions = []
-        for item in cfg.get("actions", []):
-            key = str(item.get("key", "")).lower()
-            if key:
-                self.actions.append({"key": key, "data": item.get("data"),
-                                     "label": item.get("label", key.upper())})
-
-    @property
-    def header_hex(self) -> str:
-        return ' '.join(f'0x{b:02X}' for b in self.header)
-
-
 class ActionsPanel(tk.Frame):
     """Buttons for the configured actions + a reload button."""
 
@@ -125,134 +63,64 @@ class ActionsPanel(tk.Frame):
 # Keyboard control
 # -----------------------------
 class KeyboardController:
-    """Translates W/A/S/D/E keys (continuous stream) and action keys (one-shot) into BLE writes."""
+    """Tk adapter: feeds key events to a DriveController.
+
+    Tk (X11 in particular) generates a release/press pair for every auto-repeat,
+    so direction key releases are debounced: a release only counts if the key was
+    not pressed again within `release_delay_s`.
+    """
 
     def __init__(self, root: tk.Misc, conn: BleConnection, config: ActionsConfig,
-                 end_data: Callable[[], bytes]) -> None:
+                 end_data: Callable[[], bytes], release_delay_s: float = 0.03) -> None:
         self.root = root
-        self.conn = conn
-        self.config = config
-        self.end_data = end_data
+        self.drive = DriveController(conn, config, end_data)
+        self.release_delay_s = release_delay_s
 
         self.enabled_var = tk.BooleanVar(value=True)
         self.frequency_var = tk.StringVar(value=str(DEFAULT_FREQUENCY_HZ))
 
-        self._pressed_keys: set[str] = set()            # one-shot actions (avoid key repeat)
-        self._key_stack: list[str] = []                 # LIFO stack of direction keys
-        self._last_release_time: Dict[str, float] = {}  # KeyRelease debounce
-        self._release_delay_s: float = 0.03             # 30 ms
-
-        self._dir_payload: Optional[bytes] = None
-        self._dir_period_s: float = 1.0 / DEFAULT_FREQUENCY_HZ
-        self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._direction_sender_loop, daemon=True)
-        self._thread.start()
+        self._pending_release: Dict[str, float] = {}  # key -> time of its last unconfirmed release
 
     def bind(self) -> None:
         self.root.bind_all("<KeyPress>", self._on_key_press, add=True)
         self.root.bind_all("<KeyRelease>", self._on_key_release, add=True)
 
-    def shutdown(self) -> None:
-        self._stop_event.set()
-
-    # --- One-shot actions ---
     def trigger_action(self, act: Dict[str, Any]) -> None:
-        if not self.conn.is_connected:
-            self.conn.log.emit("Not connected to any device.\n")
-            return
-        try:
-            payload = to_bytes(act.get("data")) + self.end_data()
-        except Exception as e:
-            self.conn.log.emit(f"Invalid action payload: {e}\n")
-            return
-        self.conn.write(payload)
-        shown = act.get("label") or act.get("key", "?").upper()
-        self.conn.log.emit(f"Action sent: {shown}\n")
+        self.drive.trigger_action(act)
 
-    # --- Keyboard events (stack model) ---
+    def shutdown(self) -> None:
+        self.drive.shutdown()
+
+    def _apply_frequency(self) -> None:
+        try:
+            self.drive.set_frequency(float(self.frequency_var.get()))
+        except ValueError:
+            self.frequency_var.set(str(DEFAULT_FREQUENCY_HZ))
+            self.drive.set_frequency(DEFAULT_FREQUENCY_HZ)
+
     def _on_key_press(self, event: tk.Event) -> Optional[str]:
         if not self.enabled_var.get():
             return None
         key = (event.keysym or '').lower()
-
+        self._pending_release.pop(key, None)  # a new press cancels a pending release
         if key in DIRECTION_KEYS:
-            if key not in self._key_stack:
-                self._key_stack.append(key)
-                self._snapshot_period()
-                self._recompute_from_stack_and_send()
-            return "break"
-
-        for act in self.config.actions:
-            if act.get("key") == key:
-                if key not in self._pressed_keys:
-                    self._pressed_keys.add(key)
-                    self.trigger_action(act)
-                return "break"
-        return None
+            self._apply_frequency()
+        return "break" if self.drive.key_down(key) else None
 
     def _on_key_release(self, event: tk.Event) -> Optional[str]:
         key = (event.keysym or '').lower()
-        self._pressed_keys.discard(key)
-
-        if key in DIRECTION_KEYS:
-            t = time.time()
-            self._last_release_time[key] = t
-            self.root.after(int(self._release_delay_s * 1000),
-                            lambda k=key, ts=t: self._confirm_release(k, ts))
-            return "break" if self.enabled_var.get() else None
-        return None
+        if key not in DIRECTION_KEYS:
+            self.drive.key_up(key)
+            return None
+        t = time.time()
+        self._pending_release[key] = t
+        self.root.after(int(self.release_delay_s * 1000), lambda: self._confirm_release(key, t))
+        return "break" if self.enabled_var.get() else None
 
     def _confirm_release(self, key: str, ts: float) -> None:
-        # confirm the release only if there was no newer press since ts
-        if self._last_release_time.get(key, 0) == ts and key in self._key_stack:
-            self._key_stack = [k for k in self._key_stack if k != key]
-            self._recompute_from_stack_and_send()
-
-    def _snapshot_period(self) -> None:
-        try:
-            hz = max(1.0, float(self.frequency_var.get()))
-        except Exception:
-            hz = float(DEFAULT_FREQUENCY_HZ)
-            self.frequency_var.set(str(DEFAULT_FREQUENCY_HZ))
-        self._dir_period_s = 1.0 / hz
-
-    def _recompute_from_stack_and_send(self) -> None:
-        # empty stack -> STOP, otherwise send the command on top of the stack
-        if not self._key_stack:
-            self._dir_payload = None
-            self._send_stop()
-            return
-        raw = self.config.directions.get(self._key_stack[-1])
-        if raw is None:
-            return
-        try:
-            self._dir_payload = to_bytes(raw) + self.end_data()
-            if self.conn.is_connected:
-                self.conn.write(self._dir_payload)
-        except Exception as e:
-            self.conn.log.emit(f"Payload error: {e}\n")
-
-    def _send_stop(self) -> None:
-        if not self.conn.is_connected or self.config.stop is None:
-            return
-        try:
-            payload = to_bytes(self.config.stop) + self.end_data()
-        except Exception as e:
-            self.conn.log.emit(f"Invalid stop payload: {e}\n")
-            return
-        self.conn.write(payload)
-        self.conn.log.emit(f"Sent: {self.config.stop}\n")
-
-    def _direction_sender_loop(self) -> None:
-        last_sent = 0.0
-        while not self._stop_event.is_set():
-            now = time.time()
-            payload = self._dir_payload
-            if payload and self.conn.is_connected and self._dir_period_s > 0:
-                if now - last_sent >= self._dir_period_s:
-                    if self.conn.write(payload):
-                        last_sent = now
-            time.sleep(0.005)
+        if self._pending_release.get(key) == ts:
+            del self._pending_release[key]
+            self.drive.key_up(key)
 
 
 # -----------------------------
@@ -316,9 +184,7 @@ class Application(tk.Tk):
         self.sender.set_entry_enabled(not self.keyboard.enabled_var.get())
 
     def _add_header(self, payload: bytes) -> bytes:
-        if self.use_header_var.get() and self.actions_config.header:
-            return bytes(self.actions_config.header) + payload
-        return payload
+        return self.actions_config.with_header(payload) if self.use_header_var.get() else payload
 
     def _describe_sent(self, message: str) -> str:
         header_info = f" (with header {self.actions_config.header})" if self.use_header_var.get() else ""

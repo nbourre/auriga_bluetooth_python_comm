@@ -280,15 +280,10 @@ Optional 2-byte header prepended to messages:
 
 ## Installation
 
-All scripts require Python 3.7+ and the `bleak` library:
+All scripts require Python 3.10+ and the `bleak` library. From the repository root, in a virtual environment (see the main [README](../readme.md#installation)):
 
 ```bash
-pip install bleak
-```
-
-Optional (for enhanced features):
-```bash
-pip install asyncio
+pip install -r requirements.txt
 ```
 
 ---

@@ -1,0 +1,15 @@
+# Python dependencies for the Auriga BLE tools.
+# Install with:  pip install -r requirements.txt
+#
+# tkinter (gui_ble.py, gui_ble_wasd.py) is NOT installed by pip: it ships with
+# Python. See the "Requirements" section of readme.md for Linux / macOS notes.
+
+# BLE communication (all apps). The platform-specific backend is selected
+# automatically by bleak, so no per-OS entries are needed here:
+#   Windows -> winrt-*      macOS -> pyobjc-*      Linux -> dbus-fast (needs BlueZ)
+bleak>=3.0
+
+# Only for gui_ble_pygame.py and gui_ble_telemetry.py.
+# pygame-ce is the actively maintained fork of pygame (same `import pygame`);
+# it ships wheels for recent Python versions. Do not install both packages.
+pygame-ce>=2.5

@@ -10,7 +10,6 @@ the subscriber to hop back to its own thread when needed.
 import asyncio
 import json
 import os
-import sys
 import threading
 import traceback
 from dataclasses import dataclass
@@ -43,50 +42,6 @@ def to_bytes(payload: PayloadType) -> bytes:
     raise TypeError(f"Unsupported payload type: {type(payload)}")
 
 
-APP_DIR_NAME = "auriga_ble"
-HISTORY_FILE_NAME = "message_history.json"
-
-
-def user_data_dir(app_name: str = APP_DIR_NAME) -> str:
-    """Per-user directory for application data, following each platform's convention.
-
-    Windows: %LOCALAPPDATA%\\<app>   macOS: ~/Library/Application Support/<app>
-    Linux/other: $XDG_STATE_HOME/<app> (default ~/.local/state/<app>)
-    """
-    home = os.path.expanduser("~")
-    if sys.platform.startswith("win"):
-        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or home
-    elif sys.platform == "darwin":
-        base = os.path.join(home, "Library", "Application Support")
-    else:
-        base = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
-    return os.path.join(base, app_name)
-
-
-def default_history_path() -> str:
-    return os.path.join(user_data_dir(), HISTORY_FILE_NAME)
-
-
-def load_history(path: str) -> List[str]:
-    """Read a list of sent messages from `path` (empty list if missing or corrupt)."""
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return [m for m in data if isinstance(m, str)] if isinstance(data, list) else []
-    except (OSError, ValueError):
-        return []
-
-
-def save_history(path: str, history: List[str]) -> None:
-    """Write the history to `path`, creating the directory if needed. Errors are ignored."""
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(history, f, ensure_ascii=False)
-    except OSError:
-        pass
-
-
 def load_last_device() -> Optional[str]:
     try:
         if not os.path.exists(DEVICE_FILE):
@@ -103,6 +58,24 @@ def save_last_device(device_name: str) -> None:
             json.dump({"device_name": device_name}, f)
     except OSError:
         pass
+
+
+class LineAssembler:
+    """Reassemble notification chunks into complete lines (CRLF is normalized to LF)."""
+
+    def __init__(self) -> None:
+        self._buffer = ""
+
+    def feed(self, chunk: str) -> List[str]:
+        """Add a chunk and return the lines completed by it (without their line ending)."""
+        self._buffer = (self._buffer + chunk).replace("\r\n", "\n")
+        *lines, self._buffer = self._buffer.split("\n")
+        return lines
+
+    def flush(self) -> str:
+        """Return (and forget) the incomplete line left in the buffer."""
+        rest, self._buffer = self._buffer, ""
+        return rest
 
 
 class Signal:
@@ -287,6 +260,14 @@ class BleConnection:
     def write(self, payload: bytes):
         """Write a payload (after `payload_wrapper`). Returns the Future, or None."""
         return self.run(self._write(payload))
+
+    def send_text(self, text: str, end: bytes = b"") -> bool:
+        """Encode `text` (+ line ending) and write it. Returns False if not connected."""
+        if not self.is_connected:
+            self.log.emit("Not connected to any device.\n")
+            return False
+        self.write(text.encode('utf-8') + end)
+        return True
 
     async def _write(self, payload: bytes) -> None:
         try:
