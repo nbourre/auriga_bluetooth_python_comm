@@ -1,0 +1,27 @@
+{
+  "header": [255, 85],
+  "directions": {
+    "w": "W",
+    "a": "A",
+    "s": "S",
+    "d": "D",
+    "e": "E",
+    "stop": "T"
+  },
+  "actions": [
+    { "key": "c", "data": "C",    "label": "Calibration" },
+    { "key": "g", "data": "GO",   "label": "Démarrer la mission" },
+    { "key": "x", "data": "STOP", "label": "Arrêter la mission" },
+    { "key": "m", "data": "MAN",  "label": "Mode manuel" },
+
+    { "key": "1", "data": "p,50",  "label": "Vitesse minimale" },
+    { "key": "2", "data": "p,150", "label": "Vitesse moyenne" },
+    { "key": "3", "data": "p,255", "label": "Vitesse maximale" },
+
+    { "key": "r", "data": "l,255,0,0",   "label": "Anneau rouge" },
+    { "key": "y", "data": "l,255,255,0", "label": "Anneau jaune" },
+    { "key": "v", "data": "l,0,255,0",   "label": "Anneau vert" },
+    { "key": "o", "data": "l,0,0,0",     "label": "Anneau éteint" },
+    { "key": "i", "data": "l,1,50,0,50", "label": "LED 1 violette" }
+  ]
+}
