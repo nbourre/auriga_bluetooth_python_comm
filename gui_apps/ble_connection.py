@@ -10,6 +10,7 @@ the subscriber to hop back to its own thread when needed.
 import asyncio
 import json
 import os
+import sys
 import threading
 import traceback
 from dataclasses import dataclass
@@ -40,6 +41,50 @@ def to_bytes(payload: PayloadType) -> bytes:
     if isinstance(payload, list):
         return bytes([int(x) & 0xFF for x in payload])
     raise TypeError(f"Unsupported payload type: {type(payload)}")
+
+
+APP_DIR_NAME = "auriga_ble"
+HISTORY_FILE_NAME = "message_history.json"
+
+
+def user_data_dir(app_name: str = APP_DIR_NAME) -> str:
+    """Per-user directory for application data, following each platform's convention.
+
+    Windows: %LOCALAPPDATA%\\<app>   macOS: ~/Library/Application Support/<app>
+    Linux/other: $XDG_STATE_HOME/<app> (default ~/.local/state/<app>)
+    """
+    home = os.path.expanduser("~")
+    if sys.platform.startswith("win"):
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or home
+    elif sys.platform == "darwin":
+        base = os.path.join(home, "Library", "Application Support")
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
+    return os.path.join(base, app_name)
+
+
+def default_history_path() -> str:
+    return os.path.join(user_data_dir(), HISTORY_FILE_NAME)
+
+
+def load_history(path: str) -> List[str]:
+    """Read a list of sent messages from `path` (empty list if missing or corrupt)."""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return [m for m in data if isinstance(m, str)] if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save_history(path: str, history: List[str]) -> None:
+    """Write the history to `path`, creating the directory if needed. Errors are ignored."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False)
+    except OSError:
+        pass
 
 
 def load_last_device() -> Optional[str]:

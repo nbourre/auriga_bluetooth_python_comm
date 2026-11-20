@@ -12,9 +12,10 @@ and moves the updates back onto the Tk thread. They can be freely assembled:
 """
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
-from ble_connection import END_DATA_OPTIONS, BleConnection, DiscoveredDevice, load_last_device
+from ble_connection import (END_DATA_OPTIONS, BleConnection, DiscoveredDevice, default_history_path,
+                            load_history, load_last_device, save_history)
 
 
 class PlaceholderEntry(tk.Entry):
@@ -163,13 +164,25 @@ class MessageSender(_ThreadSafeMixin, tk.Frame):
 
     Other widgets can be added to `self.extras` (placed before the Send button).
     `describe_sent(msg)` customizes the text logged after sending.
+
+    Like the Arduino serial monitor, the Up / Down keys in the text field browse
+    the history of sent messages (at most `max_history`). The history is saved in
+    the per-user data directory (see `user_data_dir`) so it survives restarts;
+    pass `history_file=None` to keep it in memory only.
     """
 
     def __init__(self, parent, conn: BleConnection,
-                 describe_sent: Callable[[str], str] = lambda msg: f"Sent: {msg}") -> None:
+                 describe_sent: Callable[[str], str] = lambda msg: f"Sent: {msg}",
+                 max_history: int = 100,
+                 history_file: Optional[str] = default_history_path()) -> None:
         super().__init__(parent)
         self.conn = conn
         self.describe_sent = describe_sent
+        self.max_history = max_history
+        self.history_file = history_file
+        self._history: List[str] = load_history(history_file)[-max_history:] if history_file else []
+        self._history_index = len(self._history)  # == len(history) when not browsing
+        self._draft = ""          # text being typed before browsing started
         self.line_ending_var = tk.StringVar(value="BOTH")
 
         self.entry = PlaceholderEntry(self, placeholder="Enter your text here")
@@ -177,6 +190,8 @@ class MessageSender(_ThreadSafeMixin, tk.Frame):
         # Pressing Enter in the text field sends the message
         self.entry.bind("<Return>", lambda _e: self.send())
         self.entry.bind("<KP_Enter>", lambda _e: self.send())
+        self.entry.bind("<Up>", lambda _e: self._browse_history(-1))
+        self.entry.bind("<Down>", lambda _e: self._browse_history(+1))
 
         self.line_endings_dropdown = ttk.Combobox(self, textvariable=self.line_ending_var,
                                                   values=list(END_DATA_OPTIONS), width=6, state="readonly")
@@ -204,7 +219,37 @@ class MessageSender(_ThreadSafeMixin, tk.Frame):
             return
         self.conn.write(msg.encode('utf-8') + self.end_data())
         self.conn.log.emit(self.describe_sent(msg) + "\n")
+        self._add_to_history(msg)
         self.entry.delete(0, tk.END)
+
+    def _add_to_history(self, msg: str) -> None:
+        if not self._history or self._history[-1] != msg:  # skip consecutive duplicates
+            self._history.append(msg)
+            del self._history[:-self.max_history]
+            if self.history_file:
+                save_history(self.history_file, self._history)
+        self._history_index = len(self._history)
+        self._draft = ""
+
+    def _browse_history(self, step: int) -> str:
+        """Move through the history (-1 = older, +1 = newer) and show the entry in the field."""
+        if not self._history:
+            return "break"
+        if self._history_index == len(self._history):
+            self._draft = self.entry.get_value()  # remember what was being typed
+        new_index = self._history_index + step
+        if new_index < 0 or new_index > len(self._history):
+            return "break"
+        self._history_index = new_index
+        if new_index == len(self._history):
+            text = self._draft
+        else:
+            text = self._history[new_index]
+        if text:
+            self.entry.set_text(text)
+        else:
+            self.entry.delete(0, tk.END)
+        return "break"  # keep the cursor from jumping inside the field
 
 
 class LogView(_ThreadSafeMixin, tk.Frame):
