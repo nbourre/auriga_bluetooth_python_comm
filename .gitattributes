@@ -1,0 +1,6 @@
+# Auto-detect text files and normalize to LF in the repository
+* text=auto
+
+# Explicitly enforce endings for OS-sensitive scripts
+*.sh text eol=lf
+*.bat text eol=crlf
